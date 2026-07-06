@@ -1,5 +1,6 @@
 #include <Arduino.h>
 
+#include "board.h"
 #include "config_store.h"
 #include "display_ui.h"
 #include "encoder_fsm.h"
@@ -20,6 +21,7 @@ Transport gTransport;
 ConfigStore gConfigStore;
 DeviceConfig gConfig;
 UiState gUi;
+bool gRenderDirty = true;
 
 const char* nextInterval(const char* current) {
   size_t index = 2;
@@ -32,15 +34,24 @@ const char* nextInterval(const char* current) {
   return kIntervals[(index + 1) % kIntervalCount];
 }
 
+void markDirty() { gRenderDirty = true; }
+
 void applySync(const SyncPayload& payload) {
-  gUi.confirmedBpm = payload.bpm;
-  if (!gUi.editing) {
+  if (!gEncoder.isEditing()) {
+    if (gUi.displayedBpm != payload.bpm || gUi.confirmedBpm != payload.bpm) {
+      markDirty();
+    }
+    gUi.confirmedBpm = payload.bpm;
     gUi.displayedBpm = payload.bpm;
+    gEncoder.onSyncBpm(payload.bpm);
+  }
+  if (gUi.running != payload.running || gUi.clickEnabled != payload.clickEnabled ||
+      strcmp(gUi.clickInterval, payload.clickInterval) != 0) {
+    markDirty();
   }
   gUi.running = payload.running;
   gUi.clickEnabled = payload.clickEnabled;
   gUi.clickInterval = payload.clickInterval;
-  gEncoder.onSyncBpm(payload.bpm);
 }
 
 void onBeat(float beat) {
@@ -59,10 +70,12 @@ void handleSettingsAction(int page, bool tap) {
       gUi.pulseEnabled = !gUi.pulseEnabled;
       gConfig.pulseEnabled = gUi.pulseEnabled;
       gConfigStore.save(gConfig);
+      markDirty();
       break;
     default:
       gUi.clickInterval = nextInterval(gUi.clickInterval);
       gTransport.sendInterval(gUi.clickInterval);
+      markDirty();
       break;
   }
 }
@@ -70,8 +83,12 @@ void handleSettingsAction(int page, bool tap) {
 }  // namespace
 
 void setup() {
+  board::powerOn();
   Serial.begin(115200);
-  delay(200);
+  delay(1500);
+  Serial.println();
+  Serial.println("MIDIJuggler-RotaryDisplay boot");
+
   gConfigStore.begin();
   gConfigStore.load(&gConfig);
   gUi.pulseEnabled = gConfig.pulseEnabled;
@@ -79,11 +96,17 @@ void setup() {
   gUi.confirmedBpm = 120.0f;
   gUi.clickInterval = "quarter";
 
+  Serial.println("init display");
   gDisplay.begin();
-  gEncoder.begin(40.0f, 240.0f, gConfig.bpmStep);
-  gLeds.begin();
-  gTouch.begin();
+  Serial.println("display init done");
   gDisplay.render(gUi);
+  Serial.println("init encoder");
+  gEncoder.begin(40.0f, 240.0f, gConfig.bpmStep);
+  Serial.println("init leds");
+  gLeds.begin();
+  Serial.println("init touch");
+  gTouch.begin();
+  Serial.println("init transport");
   gTransport.begin(
       gConfig,
       applySync,
@@ -91,33 +114,45 @@ void setup() {
   gTransport.setConfigHandler([](const char* line) {
     gConfigStore.applySerialCommand(line, &gConfig);
   });
-  gDisplay.render(gUi);
+  gRenderDirty = true;
+  Serial.println("ready");
 }
 
 void loop() {
-  gTransport.loop();
-  gTouch.loop(&gUi, handleSettingsAction);
+  const int previousPage = gUi.settingsPage;
 
   const EncoderFsm::Result encoder = gEncoder.update();
+  gUi.editing = gEncoder.isEditing();
   if (encoder.bpmChanged) {
-    gUi.editing = true;
     gUi.displayedBpm = encoder.newBpm;
+    markDirty();
   }
   if (encoder.cancelEdit) {
-    gUi.editing = false;
     gUi.displayedBpm = encoder.newBpm;
+    markDirty();
   }
   if (encoder.confirmEdit) {
-    gUi.editing = false;
     gUi.displayedBpm = encoder.newBpm;
     gUi.confirmedBpm = encoder.newBpm;
     gTransport.sendBpm(encoder.newBpm);
+    markDirty();
   }
   if (encoder.toggleTransport) {
     gTransport.sendStartStop();
   }
 
+  gTouch.loop(&gUi, handleSettingsAction);
+  if (gUi.settingsPage != previousPage) {
+    markDirty();
+  }
+
+  gTransport.loop();
+
+  if (gRenderDirty) {
+    gDisplay.render(gUi);
+    gRenderDirty = false;
+  }
+
   gLeds.tick();
-  gDisplay.render(gUi);
-  delay(10);
+  delay(4);
 }

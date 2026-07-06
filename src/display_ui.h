@@ -6,7 +6,6 @@ struct UiState {
   float displayedBpm = 120.0f;
   float confirmedBpm = 120.0f;
   bool editing = false;
-  bool blinkOn = true;
   bool running = false;
   bool clickEnabled = false;
   bool pulseEnabled = true;
@@ -21,8 +20,16 @@ class DisplayUi {
   void setMessage(const char* message);
 
  private:
+  void drawStatus(const UiState& state);
+  void drawBpmCard(const UiState& state);
+  void drawSettings(const UiState& state);
+  void drawFooter();
+  void pushFull();
+
   PanelDisplay lcd_;
+  lgfx::LGFX_Sprite canvas_{&lcd_};
+  UiState lastRendered_{};
   char message_[48] = "";
-  uint32_t lastBlinkMs_ = 0;
-  bool blinkOn_ = true;
+  char lastMessage_[48] = "";
+  bool ready_ = false;
 };

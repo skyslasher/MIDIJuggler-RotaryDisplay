@@ -1,10 +1,35 @@
 #include "encoder_fsm.h"
 
+#include <driver/pcnt.h>
+
 #include "board.h"
 
 namespace {
 
 constexpr uint32_t kEditTimeoutMs = 5000;
+constexpr pcnt_unit_t kPcntUnit = PCNT_UNIT_0;
+constexpr int kPulsesPerDetent = 4;
+
+void initPcnt() {
+  pcnt_config_t config = {};
+  config.pulse_gpio_num = board::kEncoderA;
+  config.ctrl_gpio_num = board::kEncoderB;
+  config.lctrl_mode = PCNT_MODE_REVERSE;
+  config.hctrl_mode = PCNT_MODE_KEEP;
+  config.pos_mode = PCNT_COUNT_INC;
+  config.neg_mode = PCNT_COUNT_DEC;
+  config.counter_h_lim = 32767;
+  config.counter_l_lim = -32768;
+  config.unit = kPcntUnit;
+  config.channel = PCNT_CHANNEL_0;
+
+  pcnt_unit_config(&config);
+  pcnt_set_filter_value(kPcntUnit, 80);
+  pcnt_filter_enable(kPcntUnit);
+  pcnt_counter_pause(kPcntUnit);
+  pcnt_counter_clear(kPcntUnit);
+  pcnt_counter_resume(kPcntUnit);
+}
 
 }  // namespace
 
@@ -12,10 +37,9 @@ void EncoderFsm::begin(float bpmMin, float bpmMax, float step) {
   bpmMin_ = bpmMin;
   bpmMax_ = bpmMax;
   step_ = step;
-  pinMode(board::kEncoderA, INPUT_PULLUP);
-  pinMode(board::kEncoderB, INPUT_PULLUP);
   pinMode(board::kEncoderSwitch, INPUT_PULLUP);
-  lastEncoded_ = (digitalRead(board::kEncoderA) << 1) | digitalRead(board::kEncoderB);
+  pcntRemainder_ = 0;
+  initPcnt();
 }
 
 void EncoderFsm::onSyncBpm(float bpm) {
@@ -26,35 +50,49 @@ void EncoderFsm::onSyncBpm(float bpm) {
   editBpm_ = bpm;
 }
 
+void EncoderFsm::consumePcnt(Result* result) {
+  int16_t count = 0;
+  pcnt_get_counter_value(kPcntUnit, &count);
+  pcnt_counter_clear(kPcntUnit);
+  if (count == 0) {
+    return;
+  }
+
+  pcntRemainder_ -= count;
+  int steps = 0;
+  while (pcntRemainder_ >= kPulsesPerDetent) {
+    ++steps;
+    pcntRemainder_ -= kPulsesPerDetent;
+  }
+  while (pcntRemainder_ <= -kPulsesPerDetent) {
+    --steps;
+    pcntRemainder_ += kPulsesPerDetent;
+  }
+  if (steps == 0) {
+    return;
+  }
+
+  if (!editing_) {
+    editing_ = true;
+    rotatedWhileEditing_ = true;
+    editStartedMs_ = millis();
+    editBpm_ = confirmedBpm_;
+  }
+  editStartedMs_ = millis();
+  editBpm_ += steps * step_;
+  if (editBpm_ < bpmMin_) editBpm_ = bpmMin_;
+  if (editBpm_ > bpmMax_) editBpm_ = bpmMax_;
+  result->bpmChanged = true;
+  result->newBpm = editBpm_;
+}
+
 EncoderFsm::Result EncoderFsm::update() {
   Result result;
   static uint8_t lastSwitch = HIGH;
-  const uint8_t switchState = digitalRead(board::kEncoderSwitch);
-  const int encoded = (digitalRead(board::kEncoderA) << 1) | digitalRead(board::kEncoderB);
-  if (encoded != lastEncoded_) {
-    const int delta = ((lastEncoded_ << 2) | encoded) & 0x0F;
-    int direction = 0;
-    if (delta == 0b1101 || delta == 0b0100 || delta == 0b0010 || delta == 0b1011) {
-      direction = 1;
-    } else if (delta == 0b1110 || delta == 0b0111 || delta == 0b0001 || delta == 0b1000) {
-      direction = -1;
-    }
-    if (direction != 0) {
-      if (!editing_) {
-        editing_ = true;
-        rotatedWhileEditing_ = true;
-        editStartedMs_ = millis();
-        editBpm_ = confirmedBpm_;
-      }
-      editBpm_ += direction * step_;
-      if (editBpm_ < bpmMin_) editBpm_ = bpmMin_;
-      if (editBpm_ > bpmMax_) editBpm_ = bpmMax_;
-      result.bpmChanged = true;
-      result.newBpm = editBpm_;
-    }
-    lastEncoded_ = encoded;
-  }
 
+  consumePcnt(&result);
+
+  const uint8_t switchState = digitalRead(board::kEncoderSwitch);
   if (lastSwitch == HIGH && switchState == LOW) {
     if (editing_ && rotatedWhileEditing_) {
       confirmedBpm_ = editBpm_;
@@ -76,8 +114,5 @@ EncoderFsm::Result EncoderFsm::update() {
     result.newBpm = confirmedBpm_;
   }
 
-  if (result.bpmChanged || result.cancelEdit) {
-    result.newBpm = editBpm_;
-  }
   return result;
 }
