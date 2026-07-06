@@ -54,7 +54,7 @@ void sendOscString(const char* host, uint16_t port, const char* address, const c
   sendOscPacket(host, port, packet, offset);
 }
 
-void sendOscHello(const char* host, uint16_t port, const char* ip, uint16_t listenPort) {
+void sendOscHelloPacket(const char* host, uint16_t port, const char* ip, uint16_t listenPort) {
   uint8_t packet[128] = {0};
   size_t offset = 0;
   const size_t addrLen = pad4(strlen(kHelloAddress) + 1);
@@ -104,7 +104,7 @@ void Transport::begin(const DeviceConfig& config, SyncCallback onSync, BeatCallb
     manager.autoConnect("RotaryDisplay-Setup");
     if (WiFi.status() == WL_CONNECTED) {
       gRx.begin(listenPort_);
-      sendOscHello(host_, oscPort_, WiFi.localIP().toString().c_str(), listenPort_);
+      sendOscHelloPacket(host_, oscPort_, WiFi.localIP().toString().c_str(), listenPort_);
     }
   }
   if (useSerial_) {
@@ -158,7 +158,7 @@ void Transport::sendHello() {
     sendSerialLine("hello");
   }
   if (useWifi_ && WiFi.status() == WL_CONNECTED) {
-    sendOscHello(host_, oscPort_, WiFi.localIP().toString().c_str(), listenPort_);
+    sendOscHelloPacket(host_, oscPort_, WiFi.localIP().toString().c_str(), listenPort_);
   }
 }
 
@@ -195,7 +195,7 @@ void Transport::sendOscInterval(const char* interval) {
   sendOscString(host_, oscPort_, kIntervalAddress, interval);
 }
 void Transport::sendOscHello() {
-  sendOscHello(host_, oscPort_, WiFi.localIP().toString().c_str(), listenPort_);
+  sendOscHelloPacket(host_, oscPort_, WiFi.localIP().toString().c_str(), listenPort_);
 }
 
 void Transport::pollSerial() {
