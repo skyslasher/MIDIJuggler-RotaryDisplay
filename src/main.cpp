@@ -83,6 +83,7 @@ void setup() {
   gEncoder.begin(40.0f, 240.0f, gConfig.bpmStep);
   gLeds.begin();
   gTouch.begin();
+  gDisplay.render(gUi);
   gTransport.begin(
       gConfig,
       applySync,

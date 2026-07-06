@@ -22,8 +22,10 @@ const char* intervalLabel(const char* interval) {
 }  // namespace
 
 void DisplayUi::begin() {
+  pinMode(board::kDisplayBl, OUTPUT);
+  digitalWrite(board::kDisplayBl, HIGH);
   lcd_.init();
-  lcd_.setBrightness(200);
+  lcd_.setBrightness(255);
   lcd_.fillScreen(kBg);
 }
 

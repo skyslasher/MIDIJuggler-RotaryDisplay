@@ -21,6 +21,21 @@ Requires a running MIDIJuggler instance with the `rotary_display` module enabled
 
 ## Build
 
+For **USB to the Mac** (recommended first):
+
+```bash
+pio run -e elecrow128-serial -t upload --upload-port /dev/cu.usbmodemXXXX
+```
+
+For **WiFi/OSC** (opens a setup hotspot `RotaryDisplay-Setup` on first boot):
+
+```bash
+pio run -e elecrow128-wifi -t upload --upload-port /dev/cu.usbmodemXXXX
+```
+
+Default `elecrow128` enables **both** USB and WiFi; on first boot it may sit in WiFi
+setup for up to two minutes before the UI appears if no saved network exists.
+
 ```bash
 pio run -e elecrow128
 pio run -t upload
