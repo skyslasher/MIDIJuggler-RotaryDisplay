@@ -23,9 +23,9 @@ if (!file) {
 const src = fs.readFileSync(file, 'utf8');
 
 function isAlreadyPatched(text) {
+  if (text.includes('static const lgfxsb::PartDesc kParts[]')) return false;
   if (text.includes('LGFXSB_ESP32_PATCHED')) return true;
-  return text.includes('inline const lgfxsb::PartDesc* parts()') &&
-         !text.includes('static const lgfxsb::PartDesc kParts[]');
+  return text.includes('inline const lgfxsb::PartDesc* parts()');
 }
 
 function extractBalancedFn(text, signature) {
@@ -234,6 +234,7 @@ function repairSceneCounts(text, parts, scenes) {
       );
     }
     out = out.replace(/p\.partCount = \d+;/g, `p.partCount = ${parts.length};`);
+    out = out.replace(/p\.sceneCount = \d+;/g, `p.sceneCount = ${fixed.length};`);
   }
   return out;
 }
@@ -380,13 +381,18 @@ function stripHomeOverlay(text) {
       /renderScene\(Scene::Home::id,([^;]*), _ov_Home \? &_ovt_Home : nullptr, &s, &_ov_Home\)/g,
       'renderScene(Scene::Home::id,$1, nullptr, nullptr, nullptr)',
     )
-    .replace(/\n  void setOverlay\(void \(\*\)fn\)\(Canvas&, const Scene::Home&\)\) \{ _ov_Home = fn; \}\n/g, '\n');
+    .replace(/\n  void setOverlay\(void \(\*\)fn\)\(Canvas&, const Scene::Home&\)\) \{ _ov_Home = fn; \}\n/g, '\n')
+    .replace(
+      /void show\(const Scene::Home& s\) \{[\s\S]*?renderScene\(Scene::Home::id,[\s\S]*?\n  \}\n/,
+      `void show(const Scene::Home& s) {\n    (void)s;\n    /* Home rendering is driven by DisplayUi::renderHome() + renderHomeScene() */\n  }\n`,
+    );
 }
 
 function finalizeHeader(text, parts, scenes) {
-  let out = injectShowHome(repairUndefinedSceneIds(text), parts, scenes);
+  let out = repairUndefinedSceneIds(text);
   out = repairLayoutVisibility(out);
   out = stripHomeOverlay(out);
+  out = injectShowHome(out, parts, scenes);
   return out;
 }
 
@@ -414,6 +420,9 @@ if (isAlreadyPatched(src)) {
     }
   } else {
     console.log(`${file}: already patched`);
+  }
+  if (!src.includes('static const lgfxsb::PartDesc kParts[]')) {
+    console.log('Hinweis: Layout-Farben (z.B. bpmAccent) ändern sich nur mit einem frischen LGFXScreenBuilder-Export (kParts[]), nicht durch erneutes Patchen allein.');
   }
   process.exit(0);
 }

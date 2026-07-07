@@ -19,9 +19,31 @@ fi
 
 cd "$ROOT"
 
+if [[ ! -f include/RotaryUi.h ]]; then
+  echo "ERROR: include/RotaryUi.h fehlt."
+  echo "Exportiere dein Layout aus LGFXScreenBuilder und speichere es als include/RotaryUi.h."
+  echo "Für einen lokalen Dev-Stub: cp include/RotaryUi.h.repo-stub include/RotaryUi.h"
+  exit 1
+fi
+
+if ! grep -q 'ROTARY_UI_HOME_DYNAMIC' include/RotaryUi.h; then
+  echo "ERROR: include/RotaryUi.h ist nicht dein gepatchtes LGFXScreenBuilder-Export."
+  echo "Die Datei wurde vermutlich durch 'git pull' mit der Repo-Platzhalter-Version überschrieben."
+  echo "1. Export aus LGFXScreenBuilder erneut als include/RotaryUi.h speichern"
+  echo "2. node scripts/patch-lgfxsb-export.mjs include/RotaryUi.h"
+  echo "3. ./scripts/flash-pi.sh"
+  exit 1
+fi
+
+if ! grep -q 'klickBgInactive' include/RotaryUi.h; then
+  echo "ERROR: include/RotaryUi.h enthält keine Home-Chip-Parts (klickBgInactive)."
+  exit 1
+fi
+
 if [[ -f include/RotaryUi.h ]] && command -v node >/dev/null 2>&1; then
   echo "Checking LGFXScreenBuilder export for ESP32 GCC..."
   node scripts/patch-lgfxsb-export.mjs include/RotaryUi.h
+  node scripts/verify-rotary-ui.mjs include/RotaryUi.h
 fi
 
 echo "Uploading firmware (env pi-serial)..."
