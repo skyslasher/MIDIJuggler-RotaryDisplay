@@ -38,13 +38,6 @@ void drawStatusChip(lgfx::LovyanGFX& lcd, int x, int y, int w, const char* label
   lcd.drawString(value, x + w / 2, y + 20);
 }
 
-void bootOverlay(RotaryUi::Canvas& g, const RotaryUi::Scene::Boot&) {
-  g.setFont(&fonts::Font0);
-  g.setTextDatum(textdatum_t::middle_center);
-  g.setTextColor(0x40C0F0);
-  g.drawString("Rotary Display", kCx, 142);
-}
-
 void drawFooter(lgfx::LovyanGFX& lcd, const char* message) {
   lcd.setFont(&fonts::Font0);
   lcd.setTextDatum(textdatum_t::bottom_center);
@@ -181,8 +174,7 @@ void DisplayUi::begin() {
 
   screen_ = new RotaryUi::Screen(lcd_);
   screen_->begin();
-  screen_->setProfile(RotaryUi::Profile::Cardputer);
-  screen_->setOverlay(&bootOverlay);
+  screen_->setProfile(RotaryUi::Profile::Rotary);
 
   canvas_.setColorDepth(16);
   canvas_.setPsram(true);
@@ -200,7 +192,8 @@ void DisplayUi::setMessage(const char* message) {
 
 void DisplayUi::renderBoot() {
   RotaryUi::Scene::Boot boot;
-  boot.boot = "MIDIJuggler";
+  boot.title = "MIDIJuggler";
+  boot.subtitle = "Rotary Display";
   screen_->show(boot);
 }
 
