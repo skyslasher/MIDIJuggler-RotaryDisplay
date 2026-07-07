@@ -8,7 +8,7 @@ namespace {
 
 constexpr uint32_t kEditTimeoutMs = 5000;
 constexpr pcnt_unit_t kPcntUnit = PCNT_UNIT_0;
-constexpr int kPulsesPerDetent = 4;
+constexpr int kPulsesPerDetent = 2;
 
 void initPcnt() {
   pcnt_config_t config = {};

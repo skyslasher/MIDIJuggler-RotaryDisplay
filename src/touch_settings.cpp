@@ -43,25 +43,31 @@ bool TouchSettings::readTouch(int* x, int* y) {
 void TouchSettings::loop(UiState* state, const ActionCallback& onAction) {
   static int startX = 0;
   static int startY = 0;
+  static int lastX = 0;
+  static int lastY = 0;
   static bool touching = false;
   int x = 0;
   int y = 0;
   if (!readTouch(&x, &y)) {
     if (touching) {
-      const int dx = x - startX;
-      if (abs(dx) > kSwipeThreshold) {
+      const int dx = lastX - startX;
+      const int dy = lastY - startY;
+      if (abs(dx) > kSwipeThreshold && abs(dx) >= abs(dy)) {
         if (dx > 0 && state->settingsPage > 0) {
           state->settingsPage -= 1;
         } else if (dx < 0 && state->settingsPage < 2) {
           state->settingsPage += 1;
         }
-      } else if (y > 150) {
+      } else if (abs(dx) <= kSwipeThreshold && lastY > 150) {
         onAction(state->settingsPage, true);
       }
     }
     touching = false;
     return;
   }
+
+  lastX = x;
+  lastY = y;
   if (!touching) {
     startX = x;
     startY = y;
