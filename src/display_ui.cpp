@@ -25,9 +25,23 @@ constexpr int kCx = board::kWidth / 2;
 constexpr uint16_t kBg = 0x0841;
 constexpr uint16_t kPanel = 0x10A2;
 constexpr uint16_t kAccent = 0x4CDF;
-constexpr uint16_t kRunning = 0x8800;
 constexpr uint16_t kOn = 0x47E0;
 constexpr uint16_t kOff = 0xFC18;
+
+constexpr uint16_t makeRgb565(uint8_t r, uint8_t g, uint8_t b) {
+  return static_cast<uint16_t>(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+}
+
+constexpr uint16_t kChipInactiveBg = makeRgb565(29, 34, 51);
+constexpr uint16_t kChipActiveBg = makeRgb565(62, 79, 117);
+constexpr uint16_t kChipInactiveText = makeRgb565(118, 121, 132);
+constexpr uint16_t kChipActiveText = makeRgb565(201, 204, 215);
+
+constexpr int kHomeChipY = 168;
+constexpr int kHomeChipW = 68;
+constexpr int kHomeChipH = 40;
+constexpr int kHomeChipGap = 6;
+constexpr int kHomeChipX = (board::kWidth - (kHomeChipW * 3 + kHomeChipGap * 2)) / 2;
 
 const char* intervalLabel(const char* interval) {
   if (strcmp(interval, "sixteenth") == 0) return "1/16";
@@ -37,62 +51,61 @@ const char* intervalLabel(const char* interval) {
   return "1/4";
 }
 
-void drawStatusChip(lgfx::LovyanGFX& lcd, int x, int y, int w, const char* label, const char* value,
-                    uint16_t valueColor) {
-  lcd.fillRoundRect(x, y, w, 36, 8, kPanel);
-  lcd.setFont(&fonts::Font0);
-  lcd.setTextDatum(textdatum_t::top_center);
-  lcd.setTextColor(TFT_WHITE, kPanel);
-  lcd.drawString(label, x + w / 2, y + 4);
-  lcd.setTextColor(valueColor, kPanel);
-  lcd.drawString(value, x + w / 2, y + 20);
+template <typename Gfx>
+void drawHomeStatusChip(Gfx& g, int x, int y, int w, int h, const char* text, uint16_t bg, uint16_t fg) {
+  g.fillRoundRect(x, y, w, h, 4, bg);
+  g.setFont(&fonts::Font0);
+  g.setTextDatum(textdatum_t::middle_center);
+  g.setTextColor(fg, bg);
+  g.drawString(text, x + w / 2, y + h / 2);
 }
 
-void drawFooter(lgfx::LovyanGFX& lcd, const char* message) {
-  lcd.setFont(&fonts::Font0);
-  lcd.setTextDatum(textdatum_t::bottom_center);
-  lcd.setTextColor(TFT_WHITE, kBg);
-  lcd.drawString("< swipe >", kCx, board::kHeight - 4);
+template <typename Gfx>
+void drawHomeStatusRow(Gfx& g, const UiState& state) {
+  const int x0 = kHomeChipX;
+  const int x1 = x0 + kHomeChipW + kHomeChipGap;
+  const int x2 = x1 + kHomeChipW + kHomeChipGap;
+  const uint16_t clickBg = state.clickEnabled ? kChipActiveBg : kChipInactiveBg;
+  const uint16_t clickFg = state.clickEnabled ? kChipActiveText : kChipInactiveText;
+  const uint16_t pulseBg = state.pulseEnabled ? kChipActiveBg : kChipInactiveBg;
+  const uint16_t pulseFg = state.pulseEnabled ? kChipActiveText : kChipInactiveText;
+  drawHomeStatusChip(g, x0, kHomeChipY, kHomeChipW, kHomeChipH, "Klick", clickBg, clickFg);
+  drawHomeStatusChip(g, x1, kHomeChipY, kHomeChipW, kHomeChipH, "Puls", pulseBg, pulseFg);
+  drawHomeStatusChip(g, x2, kHomeChipY, kHomeChipW, kHomeChipH, intervalLabel(state.clickInterval),
+                     kChipInactiveBg, kChipInactiveText);
+}
+
+template <typename Gfx>
+void drawFooter(Gfx& g, const char* message, uint16_t bg = kBg) {
+  g.setFont(&fonts::Font0);
+  g.setTextDatum(textdatum_t::bottom_center);
+  g.setTextColor(static_cast<uint16_t>(TFT_WHITE), bg);
+  g.drawString("< swipe >", kCx, board::kHeight - 4);
   if (message && message[0] != '\0') {
-    lcd.drawString(message, kCx, board::kHeight - 16);
+    g.drawString(message, kCx, board::kHeight - 16);
   }
 }
 
 void drawBpmPage(lgfx::LovyanGFX& lcd, const UiState& state, const char* message) {
-  lcd.fillScreen(kBg);
-  lcd.fillRect(0, 0, board::kWidth, 22, kBg);
-  lcd.setFont(&fonts::Font2);
-  lcd.setTextDatum(textdatum_t::top_center);
-  lcd.setTextColor(TFT_WHITE, kBg);
-  lcd.drawString(state.running ? "RUN" : "STOP", kCx, 4);
-
-  constexpr int cardCy = 100;
-  constexpr int cardR = 68;
-  const uint16_t cardColor = state.running ? kRunning : kPanel;
-  lcd.fillCircle(kCx, cardCy, cardR, cardColor);
-  lcd.drawCircle(kCx, cardCy, cardR, state.editing ? kAccent : cardColor);
+  constexpr uint16_t kHomeBg = makeRgb565(16, 16, 24);
+  lcd.fillScreen(kHomeBg);
+  lcd.fillRoundRect(10, 44, 220, 108, 8, kChipInactiveBg);
+  if (state.editing) {
+    lcd.drawRoundRect(10, 44, 220, 108, 8, kAccent);
+  }
 
   lcd.setTextDatum(textdatum_t::middle_center);
-  lcd.setTextColor(TFT_WHITE, cardColor);
   lcd.setFont(&fonts::Font4);
+  lcd.setTextColor(kChipActiveText, kChipInactiveBg);
   char bpmText[8];
   snprintf(bpmText, sizeof(bpmText), "%.0f", state.displayedBpm);
-  lcd.drawString(bpmText, kCx, cardCy);
+  lcd.drawString(bpmText, kCx, 96);
   lcd.setFont(&fonts::Font0);
-  lcd.setTextColor(TFT_WHITE, kBg);
-  lcd.drawString("BPM", kCx, cardCy + cardR + 6);
+  lcd.setTextColor(kChipInactiveText, kChipInactiveBg);
+  lcd.drawString("BPM", kCx, 132);
 
-  const int chipY = 168;
-  const int chipW = 68;
-  const int gap = 6;
-  const int startX = (board::kWidth - (chipW * 3 + gap * 2)) / 2;
-  drawStatusChip(lcd, startX, chipY, chipW, "Klick", state.clickEnabled ? "Ein" : "Aus",
-                 state.clickEnabled ? kOn : kOff);
-  drawStatusChip(lcd, startX + chipW + gap, chipY, chipW, "Puls", state.pulseEnabled ? "Ein" : "Aus",
-                 state.pulseEnabled ? kOn : kOff);
-  drawStatusChip(lcd, startX + (chipW + gap) * 2, chipY, chipW, "Intv", intervalLabel(state.clickInterval),
-                 kAccent);
-  drawFooter(lcd, message);
+  drawHomeStatusRow(lcd, state);
+  drawFooter(lcd, message, kHomeBg);
 }
 
 void drawClickPage(lgfx::LovyanGFX& lcd, const UiState& state, const char* message) {
@@ -173,6 +186,20 @@ void drawNetworkPage(lgfx::LovyanGFX& lcd, const UiState& state, const char* mes
 
 }  // namespace
 
+void homeOverlay(RotaryUi::Canvas& g, const RotaryUi::Scene::Home&) {
+  DisplayUi* ui = DisplayUi::instance();
+  if (!ui) {
+    return;
+  }
+  const UiState& state = ui->overlayState();
+  drawHomeStatusRow(g, state);
+  if (state.editing) {
+    g.drawRoundRect(10, 44, 220, 108, 8, kAccent);
+  }
+  constexpr uint16_t kHomeBg = makeRgb565(16, 16, 24);
+  drawFooter(g, ui->footerMessage(), kHomeBg);
+}
+
 DisplayUi* DisplayUi::instance_ = nullptr;
 
 void DisplayUi::begin() {
@@ -185,6 +212,9 @@ void DisplayUi::begin() {
   screen_ = new RotaryUi::Screen(lcd_);
   screen_->begin();
   screen_->setProfile(RotaryUi::Profile::Auto);
+#ifdef ROTARY_UI_HAS_SCENE_Home
+  screen_->setOverlay(&homeOverlay);
+#endif
 
   canvas_.setColorDepth(16);
   canvas_.setPsram(true);
@@ -207,18 +237,13 @@ void DisplayUi::renderBoot() {
   screen_->show(boot);
 }
 
-#ifdef ROTARY_UI_HAS_SCENE_Main
-void DisplayUi::renderMainBuilder(const UiState& state) {
-  RotaryUi::Scene::Main main;
+#ifdef ROTARY_UI_HAS_SCENE_Home
+void DisplayUi::renderHome(const UiState& state) {
+  overlayState_ = state;
+  RotaryUi::Scene::Home home;
   snprintf(builderBpm_, sizeof(builderBpm_), "%.0f", state.displayedBpm);
-  strlcpy(builderClick_, state.clickEnabled ? "Ein" : "Aus", sizeof(builderClick_));
-  strlcpy(builderPulse_, state.pulseEnabled ? "Ein" : "Aus", sizeof(builderPulse_));
-  strlcpy(builderInterval_, intervalLabel(state.clickInterval), sizeof(builderInterval_));
-  main.bpmtext = builderBpm_;
-  main.clicktext = builderClick_;
-  main.pulsetext = builderPulse_;
-  main.intervaltext = builderInterval_;
-  screen_->show(main);
+  home.bpmText = builderBpm_;
+  screen_->show(home);
 }
 #endif
 
@@ -226,8 +251,8 @@ void DisplayUi::renderPage(const UiState& state, bool& usedBuilder) {
   usedBuilder = false;
   switch (static_cast<SettingsPage>(state.settingsPage)) {
     case SettingsPage::Bpm:
-#ifdef ROTARY_UI_HAS_SCENE_Main
-      renderMainBuilder(state);
+#ifdef ROTARY_UI_HAS_SCENE_Home
+      renderHome(state);
       usedBuilder = true;
 #else
       drawBpmPage(canvas_, state, message_);

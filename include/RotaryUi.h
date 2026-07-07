@@ -1,17 +1,14 @@
 #pragma once
 
-#define ROTARY_UI_PART_COUNT 3
+#define ROTARY_UI_PART_COUNT 6
 #define ROTARY_UI_PROFILE_COUNT 3
 #define ROTARY_UI_HAS_SCENE_Boot 1
+#define ROTARY_UI_HAS_SCENE_Home 1
 
-// LGFXScreenBuilder export for MIDIJuggler-RotaryDisplay boot splash.
-// Profile index 2 = 240x240 (Elecrow CrowPanel). Re-export from
-// https://tanakamasayuki.github.io/LGFXScreenBuilder/ when layouts change.
+// LGFXScreenBuilder layout for MIDIJuggler-RotaryDisplay (Boot + Home).
+// Profile index 2 = 240x240 (Elecrow). Re-export from LGFXScreenBuilder when
+// layouts change; keep factory helpers for ESP32 GCC compatibility.
 // Include <LovyanGFX.hpp> and <LGFXScreenBuilder.h> before this header.
-//
-// Note: LGFXScreenBuilder 0.2.x descriptor structs use default member
-// initializers (non-aggregate). Factory helpers below work around that on
-// the ESP32 GCC toolchain.
 
 namespace RotaryUi {
 
@@ -22,6 +19,10 @@ struct Boot {
   static constexpr lgfxsb::SceneId id = 0;
   const char* title = nullptr;
   const char* subtitle = nullptr;
+};
+struct Home {
+  static constexpr lgfxsb::SceneId id = 1;
+  const char* bpmText = nullptr;
 };
 }  // namespace Scene
 
@@ -79,6 +80,9 @@ inline const lgfxsb::PartDesc* parts() {
       part("logo", lgfxsb::PartType::Rect),
       part("title", lgfxsb::PartType::Text),
       part("subtitle", lgfxsb::PartType::Text),
+      part("bpmPanel", lgfxsb::PartType::Rect),
+      part("bpmText", lgfxsb::PartType::Text),
+      part("bpmLabel", lgfxsb::PartType::Text),
   };
   return data;
 }
@@ -86,6 +90,7 @@ inline const lgfxsb::PartDesc* parts() {
 inline const lgfxsb::SceneDesc* scenes() {
   static const lgfxsb::SceneDesc data[] = {
       scene(0, "Boot", 0, 3),
+      scene(1, "Home", 3, 3),
   };
   return data;
 }
@@ -98,18 +103,27 @@ inline const lgfxsb::PartLayout* layouts() {
              "MIDIJuggler"),
       layout(160, 152, 0, 0, 0, 0, 0, (uint8_t)lgfxsb::Datum::MidCenter, 1.0f, 0x40c0f0, true, true, nullptr,
              "Rotary Display"),
+      layout(50, 40, 220, 100, 0, 0, 8, 0, 0.0f, 0x1d2233),
+      layout(160, 88, 0, 0, 0, 0, 0, (uint8_t)lgfxsb::Datum::MidCenter, 4.0f, 0xc9ccd7, true, true, nullptr, "120"),
+      layout(160, 118, 0, 0, 0, 0, 0, (uint8_t)lgfxsb::Datum::MidCenter, 1.0f, 0x767984, true, true, nullptr, "BPM"),
       // ---- Profile: Stick 135x240 rot0 ----
       layout(30, 80, 75, 50, 0, 0, 8, 0, 0.0f, 0x202028),
       layout(68, 112, 0, 0, 0, 0, 0, (uint8_t)lgfxsb::Datum::MidCenter, 1.5f, 0xffffff, true, true, nullptr,
              "MIDIJuggler"),
       layout(68, 140, 0, 0, 0, 0, 0, (uint8_t)lgfxsb::Datum::MidCenter, 1.0f, 0x40c0f0, true, true, nullptr,
              "Rotary Display"),
-      // ---- Profile: Rotary 240x240 rot0 (enum Rotary -> index 2) ----
+      layout(8, 40, 119, 90, 0, 0, 6, 0, 0.0f, 0x1d2233),
+      layout(68, 82, 0, 0, 0, 0, 0, (uint8_t)lgfxsb::Datum::MidCenter, 3.0f, 0xc9ccd7, true, true, nullptr, "120"),
+      layout(68, 104, 0, 0, 0, 0, 0, (uint8_t)lgfxsb::Datum::MidCenter, 1.0f, 0x767984, true, true, nullptr, "BPM"),
+      // ---- Profile: Rotary 240x240 rot0 ----
       layout(24, 56, 192, 128, 0, 0, 16, 0, 0.0f, 0x202028),
       layout(120, 108, 0, 0, 0, 0, 0, (uint8_t)lgfxsb::Datum::MidCenter, 2.5f, 0xffffff, true, true, nullptr,
              "MIDIJuggler"),
       layout(120, 142, 0, 0, 0, 0, 0, (uint8_t)lgfxsb::Datum::MidCenter, 1.0f, 0x40c0f0, true, true, nullptr,
              "Rotary Display"),
+      layout(10, 44, 220, 108, 0, 0, 8, 0, 0.0f, 0x1d2233),
+      layout(120, 96, 0, 0, 0, 0, 0, (uint8_t)lgfxsb::Datum::MidCenter, 4.0f, 0xc9ccd7, true, true, nullptr, "120"),
+      layout(120, 132, 0, 0, 0, 0, 0, (uint8_t)lgfxsb::Datum::MidCenter, 1.0f, 0x767984, true, true, nullptr, "BPM"),
   };
   return data;
 }
@@ -129,9 +143,9 @@ inline const lgfxsb::Project& project() {
     p.profiles = profiles();
     p.profileCount = 3;
     p.scenes = scenes();
-    p.sceneCount = 1;
+    p.sceneCount = 2;
     p.parts = parts();
-    p.partCount = 3;
+    p.partCount = 6;
     p.layouts = layouts();
     p.background = 0x101018;
     return p;
@@ -149,6 +163,10 @@ using Canvas = lgfx::LGFXBase;
 
 class Screen : public lgfxsb::RendererT<Canvas> {
   using Base = lgfxsb::RendererT<Canvas>;
+  void (*_ov_Home)(Canvas&, const Scene::Home&) = nullptr;
+  static void _ovt_Home(Canvas& g, const void* s, const void* fnp) {
+    (*static_cast<void (*const*)(Canvas&, const Scene::Home&)>(fnp))(g, *static_cast<const Scene::Home*>(s));
+  }
 
  public:
   explicit Screen(lgfx::LGFX_Device& gfx) : Base(gfx, detail::project()) {}
@@ -159,6 +177,12 @@ class Screen : public lgfxsb::RendererT<Canvas> {
     if (s.subtitle) v[2] = lgfxsb::Value::text(s.subtitle);
     renderScene(Scene::Boot::id, v, 3, nullptr, nullptr, nullptr);
   }
+  void show(const Scene::Home& s) {
+    lgfxsb::Value v[3];
+    if (s.bpmText) v[1] = lgfxsb::Value::text(s.bpmText);
+    renderScene(Scene::Home::id, v, 3, _ov_Home ? &_ovt_Home : nullptr, &s, &_ov_Home);
+  }
+  void setOverlay(void (*fn)(Canvas&, const Scene::Home&)) { _ov_Home = fn; }
 };
 
 }  // namespace RotaryUi

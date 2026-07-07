@@ -39,29 +39,27 @@ class DisplayUi {
   bool shouldRender(const UiState& state) const;
   void setMessage(const char* message);
 
+  const UiState& overlayState() const { return overlayState_; }
+  const char* footerMessage() const { return message_; }
+  static DisplayUi* instance() { return instance_; }
+
  private:
   void renderBoot();
+  void renderHome(const UiState& state);
   void renderPage(const UiState& state, bool& usedBuilder);
-#ifdef ROTARY_UI_HAS_SCENE_Main
-  void renderMainBuilder(const UiState& state);
-#endif
   void pushFull();
   bool stateChanged(const UiState& state) const;
 
   PanelDisplay lcd_;
   lgfx::LGFX_Sprite canvas_{&lcd_};
   RotaryUi::Screen* screen_ = nullptr;
+  UiState overlayState_{};
   UiState lastRendered_{};
   char message_[48] = "";
   char lastMessage_[48] = "";
+  char builderBpm_[12] = "";
   bool ready_ = false;
   bool showingBoot_ = true;
   uint32_t bootStartedMs_ = 0;
-#ifdef ROTARY_UI_HAS_SCENE_Main
-  char builderBpm_[12] = "";
-  char builderClick_[8] = "";
-  char builderPulse_[8] = "";
-  char builderInterval_[8] = "";
-#endif
   static DisplayUi* instance_;
 };
