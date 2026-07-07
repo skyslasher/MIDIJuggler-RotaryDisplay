@@ -22,6 +22,10 @@
 #error "Patched include/RotaryUi.h required (ROTARY_UI_HOME_DYNAMIC + ROTARY_UI_HOME_PART_COUNT)."
 #endif
 
+#if defined(ROTARY_UI_NO_DOUBLE_BUFFER)
+#pragma message "ROTARY_UI_NO_DOUBLE_BUFFER: settings pages draw to lcd_ (no sprite pushSprite)"
+#endif
+
 namespace {
 
 constexpr uint32_t kBootDurationMs = 2000;
@@ -158,9 +162,11 @@ void DisplayUi::begin() {
   screen_->begin();
   screen_->setProfile(RotaryUi::Profile::Auto);
 
+#if !defined(ROTARY_UI_NO_DOUBLE_BUFFER)
   canvas_.setColorDepth(16);
   canvas_.setPsram(true);
   canvas_.createSprite(board::kWidth, board::kHeight);
+#endif
 
   bootStartedMs_ = millis();
   showingBoot_ = true;
@@ -240,47 +246,69 @@ void DisplayUi::renderHome(const UiState& state) {
   home.bpmText = builderBpm_;
   screen_->show(home);
 #endif
+#if !defined(ROTARY_UI_NO_DOUBLE_BUFFER)
   // Drop stale manual-page sprite pixels so a later pushFull() cannot resurrect "< swipe >".
   canvas_.fillScreen(kBg);
+#endif
 }
 #endif
 
 void DisplayUi::renderPage(const UiState& state, bool& usedBuilder) {
   usedBuilder = false;
-  switch (static_cast<SettingsPage>(state.settingsPage)) {
-    case SettingsPage::Bpm:
+  const auto page = static_cast<SettingsPage>(state.settingsPage);
+
+  if (page == SettingsPage::Bpm) {
 #ifdef ROTARY_UI_HAS_SCENE_Home
-      renderHome(state);
-      usedBuilder = true;
-#else
-      drawBpmPage(canvas_, state, message_);
+    renderHome(state);
+    usedBuilder = true;
+    return;
 #endif
+  }
+
+#if defined(ROTARY_UI_NO_DOUBLE_BUFFER)
+  lcd_.waitDMA();
+  if (lcd_.getStartCount() > 0) {
+    lcd_.endWrite();
+  }
+  lcd_.startWrite();
+  lgfx::LovyanGFX& g = lcd_;
+#else
+  lgfx::LovyanGFX& g = canvas_;
+#endif
+
+  switch (page) {
+    case SettingsPage::Bpm:
+      drawBpmPage(g, state, message_);
       break;
     case SettingsPage::Click:
-      drawClickPage(canvas_, state, message_);
+      drawClickPage(g, state, message_);
       break;
     case SettingsPage::Pulse:
-      drawPulsePage(canvas_, state, message_);
+      drawPulsePage(g, state, message_);
       break;
     case SettingsPage::Interval:
-      drawIntervalPage(canvas_, state, message_);
+      drawIntervalPage(g, state, message_);
       break;
     case SettingsPage::Network:
-      drawNetworkPage(canvas_, state, message_);
+      drawNetworkPage(g, state, message_);
       break;
     default:
-      drawBpmPage(canvas_, state, message_);
+      drawBpmPage(g, state, message_);
       break;
   }
 }
 
 void DisplayUi::pushFull() {
+#if defined(ROTARY_UI_NO_DOUBLE_BUFFER)
+  return;
+#else
   lcd_.waitDMA();
   if (lcd_.getStartCount() > 0) {
     lcd_.endWrite();
   }
   canvas_.pushSprite(0, 0);
   lcd_.startWrite();
+#endif
 }
 
 bool DisplayUi::stateChanged(const UiState& state) const {
