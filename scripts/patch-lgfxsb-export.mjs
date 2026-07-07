@@ -321,12 +321,7 @@ function injectShowHome(text, parts, scenes) {
   out = out.replace(/\n  void renderHomeScene\([\s\S]*?\n  \}\n/g, '\n');
 
   const screenMethods = `${method}\n${renderMethod}\n`;
-  if (out.match(/void setOverlay\(void \(\*\)fn\)\(Canvas&, const Scene::Home&\)\)/)) {
-    out = out.replace(
-      /(  void setOverlay\(void \(\*\)fn\)\(Canvas&, const Scene::Home&\)\) \{ _ov_Home = fn; \}\n)/,
-      `$1${screenMethods}`,
-    );
-  } else if (out.match(/void show\(const Scene::Home&/)) {
+  if (out.match(/void show\(const Scene::Home&/)) {
     out = out.replace(/(  void show\(const Scene::Home&[\s\S]*?\n  \}\n)/, `$1${screenMethods}`);
   } else {
     out = out.replace(/(\n};)(\n\n}  \/\/ namespace RotaryUi)/, `\n${screenMethods}\n$1$2`);
@@ -376,16 +371,19 @@ function repairLayoutVisibility(text) {
 }
 
 function stripHomeOverlay(text) {
-  return text
+  let out = text
     .replace(
       /renderScene\(Scene::Home::id,([^;]*), _ov_Home \? &_ovt_Home : nullptr, &s, &_ov_Home\)/g,
       'renderScene(Scene::Home::id,$1, nullptr, nullptr, nullptr)',
     )
-    .replace(/\n  void setOverlay\(void \(\*\)fn\)\(Canvas&, const Scene::Home&\)\) \{ _ov_Home = fn; \}\n/g, '\n')
     .replace(
       /void show\(const Scene::Home& s\) \{[\s\S]*?renderScene\(Scene::Home::id,[\s\S]*?\n  \}\n/,
       `void show(const Scene::Home& s) {\n    (void)s;\n    /* Home rendering is driven by DisplayUi::renderHome() + renderHomeScene() */\n  }\n`,
     );
+  out = out.replace(/\n  void setOverlay[^\n]+\n/g, '\n');
+  out = out.replace(/\n  static void _ovt_Home\(Canvas& g, const void\* s, const void\* fnp\) \{[\s\S]*?\n  \}\n/g, '\n');
+  out = out.replace(/\n  void \(\*_ov_Home\)\(Canvas&, const Scene::Home&\) = nullptr;\n/g, '\n');
+  return out;
 }
 
 function finalizeHeader(text, parts, scenes) {

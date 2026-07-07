@@ -1,16 +1,6 @@
 #include "display_ui.h"
 
 #include <LovyanGFX.hpp>
-#if __has_include(<LGFXVirtualCanvas.h>)
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#include <LGFXVirtualCanvas.h>
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
-#endif
 #include <LGFXScreenBuilder.h>
 
 #include "RotaryUi.h"
@@ -24,6 +14,12 @@
 
 #if defined(ROTARY_UI_NO_DOUBLE_BUFFER)
 #pragma message "ROTARY_UI_NO_DOUBLE_BUFFER: settings pages draw to lcd_ (no sprite pushSprite)"
+#endif
+
+#if defined(ROTARY_UI_HOME_DYNAMIC) && defined(ROTARY_UI_HOME_PART_COUNT)
+#pragma message "Home render path: renderHomeScene (LGFXScreenBuilder direct lcd_)"
+#elif defined(ROTARY_UI_HAS_SCENE_Home)
+#pragma message "Home render path: show(Home) fallback (patched export missing ROTARY_UI_HOME_DYNAMIC?)"
 #endif
 
 namespace {
@@ -188,41 +184,51 @@ void DisplayUi::renderBoot() {
 #ifdef ROTARY_UI_HAS_SCENE_Home
 #if defined(ROTARY_UI_HOME_DYNAMIC) && defined(ROTARY_UI_HOME_PART_COUNT)
 
-// Scene-local part indices for the Home scene (must match LGFXScreenBuilder export order).
-namespace HomePart {
-constexpr uint8_t bpmAccent = 0;
-constexpr uint8_t bpmPanel = 1;
-constexpr uint8_t bpmText = 2;
-constexpr uint8_t bpmLabel = 3;
-constexpr uint8_t klickBgInactive = 4;
-constexpr uint8_t klickTextInactive = 5;
-constexpr uint8_t klickBgActive = 6;
-constexpr uint8_t klickTextActive = 7;
-constexpr uint8_t pulsBgInactive = 8;
-constexpr uint8_t pulsTextInactive = 9;
-constexpr uint8_t pulsBgActive = 10;
-constexpr uint8_t pulsTextActive = 11;
-constexpr uint8_t intervalBg = 12;
-constexpr uint8_t intervalText = 13;
-}  // namespace HomePart
-
 namespace {
 
 void fillHomeValues(lgfxsb::Value* v, const UiState& state, const char* bpmText, const char* intervalText) {
-  v[HomePart::bpmAccent] = lgfxsb::Value::boolean(state.editing);
-  v[HomePart::bpmPanel] = lgfxsb::Value::boolean(true);
-  v[HomePart::bpmText] = lgfxsb::Value::text(bpmText);
-  v[HomePart::bpmLabel] = lgfxsb::Value::boolean(true);
-  v[HomePart::klickBgInactive] = lgfxsb::Value::boolean(!state.clickEnabled);
-  v[HomePart::klickTextInactive] = lgfxsb::Value::boolean(!state.clickEnabled);
-  v[HomePart::klickBgActive] = lgfxsb::Value::boolean(state.clickEnabled);
-  v[HomePart::klickTextActive] = lgfxsb::Value::boolean(state.clickEnabled);
-  v[HomePart::pulsBgInactive] = lgfxsb::Value::boolean(!state.pulseEnabled);
-  v[HomePart::pulsTextInactive] = lgfxsb::Value::boolean(!state.pulseEnabled);
-  v[HomePart::pulsBgActive] = lgfxsb::Value::boolean(state.pulseEnabled);
-  v[HomePart::pulsTextActive] = lgfxsb::Value::boolean(state.pulseEnabled);
-  v[HomePart::intervalBg] = lgfxsb::Value::boolean(true);
-  v[HomePart::intervalText] = lgfxsb::Value::text(intervalText);
+#ifdef ROTARY_UI_HOME_IDX_bpmAccent
+  v[ROTARY_UI_HOME_IDX_bpmAccent] = lgfxsb::Value::boolean(state.editing);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_bpmPanel
+  v[ROTARY_UI_HOME_IDX_bpmPanel] = lgfxsb::Value::boolean(true);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_bpmText
+  v[ROTARY_UI_HOME_IDX_bpmText] = lgfxsb::Value::text(bpmText);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_bpmLabel
+  v[ROTARY_UI_HOME_IDX_bpmLabel] = lgfxsb::Value::boolean(true);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_klickBgInactive
+  v[ROTARY_UI_HOME_IDX_klickBgInactive] = lgfxsb::Value::boolean(!state.clickEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_klickTextInactive
+  v[ROTARY_UI_HOME_IDX_klickTextInactive] = lgfxsb::Value::boolean(!state.clickEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_klickBgActive
+  v[ROTARY_UI_HOME_IDX_klickBgActive] = lgfxsb::Value::boolean(state.clickEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_klickTextActive
+  v[ROTARY_UI_HOME_IDX_klickTextActive] = lgfxsb::Value::boolean(state.clickEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_pulsBgInactive
+  v[ROTARY_UI_HOME_IDX_pulsBgInactive] = lgfxsb::Value::boolean(!state.pulseEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_pulsTextInactive
+  v[ROTARY_UI_HOME_IDX_pulsTextInactive] = lgfxsb::Value::boolean(!state.pulseEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_pulsBgActive
+  v[ROTARY_UI_HOME_IDX_pulsBgActive] = lgfxsb::Value::boolean(state.pulseEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_pulsTextActive
+  v[ROTARY_UI_HOME_IDX_pulsTextActive] = lgfxsb::Value::boolean(state.pulseEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_intervalBg
+  v[ROTARY_UI_HOME_IDX_intervalBg] = lgfxsb::Value::boolean(true);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_intervalText
+  v[ROTARY_UI_HOME_IDX_intervalText] = lgfxsb::Value::text(intervalText);
+#endif
 }
 
 }  // namespace
@@ -231,17 +237,19 @@ void fillHomeValues(lgfxsb::Value* v, const UiState& state, const char* bpmText,
 void DisplayUi::renderHome(const UiState& state) {
   snprintf(builderBpm_, sizeof(builderBpm_), "%.0f", state.displayedBpm);
   strlcpy(builderInterval_, intervalLabel(state.clickInterval), sizeof(builderInterval_));
-  lcd_.waitDMA();
-  if (lcd_.getStartCount() > 0) {
-    lcd_.endWrite();
-  }
-  lcd_.fillScreen(0x1083);
-  lcd_.startWrite();
 #if defined(ROTARY_UI_HOME_DYNAMIC) && defined(ROTARY_UI_HOME_PART_COUNT)
   lgfxsb::Value values[ROTARY_UI_HOME_PART_COUNT]{};
   fillHomeValues(values, state, builderBpm_, builderInterval_);
+#if defined(ROTARY_UI_HOME_DEBUG) && defined(ROTARY_TRANSPORT_SERIAL)
+  Serial.printf("renderHome: dynamic parts=%u editing=%d click=%d puls=%d\n",
+                static_cast<unsigned>(ROTARY_UI_HOME_PART_COUNT), state.editing,
+                state.clickEnabled, state.pulseEnabled);
+#endif
   screen_->renderHomeScene(values, ROTARY_UI_HOME_PART_COUNT);
 #else
+#if defined(ROTARY_UI_HOME_DEBUG) && defined(ROTARY_TRANSPORT_SERIAL)
+  Serial.println("renderHome: FALLBACK show(Home) — patch include/RotaryUi.h");
+#endif
   RotaryUi::Scene::Home home;
   home.bpmText = builderBpm_;
   screen_->show(home);

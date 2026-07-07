@@ -68,6 +68,27 @@ if (projectPartCount && Number(projectPartCount[1]) !== partEntries) {
   pass(`p.partCount = ${projectPartCount[1]}`);
 }
 
+const profileCount = text.match(/p\.profileCount = (\d+);/);
+const profileEntries = (text.match(/profile\(\d+/g) || []).length;
+const layoutEntries = (text.match(/^\s+layout\(/gm) || []).length;
+if (profileCount && projectPartCount) {
+  const expectedLayouts = Number(profileCount[1]) * Number(projectPartCount[1]);
+  if (layoutEntries !== expectedLayouts) {
+    fail(`layouts(): ${layoutEntries} Einträge, erwartet ${expectedLayouts} (${profileCount[1]} profiles × ${projectPartCount[1]} parts)`);
+  } else {
+    pass(`layouts(): ${layoutEntries} (= ${profileCount[1]} × ${projectPartCount[1]})`);
+  }
+}
+if (profileCount && Number(profileCount[1]) !== profileEntries) {
+  fail(`p.profileCount=${profileCount[1]} aber ${profileEntries} profiles() Einträge`);
+}
+
+if (text.includes('void setOverlay(void (*fn)(Canvas&, const Scene::Home&))')) {
+  fail('setOverlay(Home) noch vorhanden — patch erneut ausführen (stripHomeOverlay)');
+} else {
+  pass('Home-Overlay-Hook entfernt');
+}
+
 const accentLayouts = [...text.matchAll(/layout\([^\n]*0x([0-9a-f]{6})[^\n]*bpmAccent/gi)];
 if (accentLayouts.length === 0) {
   fail('bpmAccent Layout-Zeile nicht gefunden');
