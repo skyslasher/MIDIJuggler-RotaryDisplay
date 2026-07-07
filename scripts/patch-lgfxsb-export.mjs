@@ -401,9 +401,10 @@ function injectShowHome(text, parts, scenes) {
       `#define ROTARY_UI_HAS_SCENE_Home 1\n#define ROTARY_UI_HOME_DYNAMIC 1\n#define ROTARY_UI_HOME_PART_COUNT ${home.count}\n${indexDefines}`,
     );
   } else {
+    const sceneDefines = fixedScenes.map((s) => `#define ROTARY_UI_HAS_SCENE_${s.name} 1`).join('\n');
     out = out.replace(
       '#pragma once\n',
-      `#pragma once\n\n#define ROTARY_UI_HOME_DYNAMIC 1\n#define ROTARY_UI_HOME_PART_COUNT ${home.count}\n${indexDefines}`,
+      `#pragma once\n\n${sceneDefines}\n#define ROTARY_UI_HOME_DYNAMIC 1\n#define ROTARY_UI_HOME_PART_COUNT ${home.count}\n${indexDefines}`,
     );
   }
 
@@ -454,12 +455,26 @@ function stripHomeOverlay(text) {
   return out;
 }
 
+function ensureSceneDefines(text, scenes) {
+  const missing = scenes
+    .filter((s) => !text.includes(`#define ROTARY_UI_HAS_SCENE_${s.name} 1`))
+    .map((s) => `#define ROTARY_UI_HAS_SCENE_${s.name} 1`);
+  if (missing.length === 0) return text;
+  const block = `${missing.join('\n')}\n`;
+  if (text.includes('// LGFXSB_ESP32_PATCHED')) {
+    return text.replace(/(\/\/ LGFXSB_ESP32_PATCHED[^\n]*\n)/, `$1${block}`);
+  }
+  return text.replace('#pragma once\n', `#pragma once\n\n${block}`);
+}
+
 function finalizeHeader(text, parts, scenes) {
-  let out = repairUndefinedSceneIds(text);
+  const fixedScenes = computeSceneCounts(parts, scenes);
+  let out = ensureSceneDefines(text, fixedScenes);
+  out = repairUndefinedSceneIds(out);
   out = repairLayoutVisibility(out);
   out = stripHomeOverlay(out);
   out = injectShowHome(out, parts, scenes);
-  out = repairScreenClass(out, parts, scenes);
+  out = repairScreenClass(out, parts, fixedScenes);
   return out;
 }
 

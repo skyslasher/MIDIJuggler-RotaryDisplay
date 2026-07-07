@@ -7,9 +7,13 @@
 #include "backlight.h"
 #include "board.h"
 
-#if defined(ROTARY_UI_REQUIRE_DYNAMIC) && defined(ROTARY_UI_HAS_SCENE_Home) && \
+#if defined(ROTARY_UI_REQUIRE_DYNAMIC) && \
     (!defined(ROTARY_UI_HOME_DYNAMIC) || !defined(ROTARY_UI_HOME_PART_COUNT))
 #error "Patched include/RotaryUi.h required (ROTARY_UI_HOME_DYNAMIC + ROTARY_UI_HOME_PART_COUNT)."
+#endif
+
+#if (defined(ROTARY_UI_HOME_DYNAMIC) && defined(ROTARY_UI_HOME_PART_COUNT)) || defined(ROTARY_UI_HAS_SCENE_Home)
+#define ROTARY_UI_USE_BUILDER_HOME 1
 #endif
 
 #if defined(ROTARY_UI_NO_DOUBLE_BUFFER)
@@ -181,7 +185,7 @@ void DisplayUi::renderBoot() {
   screen_->show(boot);
 }
 
-#ifdef ROTARY_UI_HAS_SCENE_Home
+#ifdef ROTARY_UI_USE_BUILDER_HOME
 #if defined(ROTARY_UI_HOME_DYNAMIC) && defined(ROTARY_UI_HOME_PART_COUNT)
 
 namespace {
@@ -240,15 +244,15 @@ void DisplayUi::renderHome(const UiState& state) {
 #if defined(ROTARY_UI_HOME_DYNAMIC) && defined(ROTARY_UI_HOME_PART_COUNT)
   lgfxsb::Value values[ROTARY_UI_HOME_PART_COUNT]{};
   fillHomeValues(values, state, builderBpm_, builderInterval_);
-#if defined(ROTARY_UI_HOME_DEBUG) && defined(ROTARY_TRANSPORT_SERIAL)
+#if defined(ROTARY_TRANSPORT_SERIAL)
   Serial.printf("renderHome: dynamic parts=%u editing=%d click=%d puls=%d\n",
                 static_cast<unsigned>(ROTARY_UI_HOME_PART_COUNT), state.editing,
                 state.clickEnabled, state.pulseEnabled);
 #endif
   screen_->renderHomeScene(values, ROTARY_UI_HOME_PART_COUNT);
 #else
-#if defined(ROTARY_UI_HOME_DEBUG) && defined(ROTARY_TRANSPORT_SERIAL)
-  Serial.println("renderHome: FALLBACK show(Home) — patch include/RotaryUi.h");
+#if defined(ROTARY_TRANSPORT_SERIAL)
+  Serial.println("renderHome: FALLBACK show(Home)");
 #endif
   RotaryUi::Scene::Home home;
   home.bpmText = builderBpm_;
@@ -266,10 +270,14 @@ void DisplayUi::renderPage(const UiState& state, bool& usedBuilder) {
   const auto page = static_cast<SettingsPage>(state.settingsPage);
 
   if (page == SettingsPage::Bpm) {
-#ifdef ROTARY_UI_HAS_SCENE_Home
+#ifdef ROTARY_UI_USE_BUILDER_HOME
     renderHome(state);
     usedBuilder = true;
     return;
+#else
+#if defined(ROTARY_TRANSPORT_SERIAL)
+    Serial.println("renderPage: manual drawBpmPage (no ROTARY_UI_HOME_DYNAMIC)");
+#endif
 #endif
   }
 

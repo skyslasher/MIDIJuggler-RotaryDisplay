@@ -36,6 +36,13 @@ if (!text.includes('ROTARY_UI_HOME_DYNAMIC')) {
   pass('ROTARY_UI_HOME_DYNAMIC gesetzt');
 }
 
+const homeScene = text.match(/scene\(\d+, "Home", (\d+), (\d+)\)/);
+if (homeScene && !text.includes('#define ROTARY_UI_HAS_SCENE_Home 1')) {
+  fail('ROTARY_UI_HAS_SCENE_Home fehlt — patch erneut ausführen (node scripts/patch-lgfxsb-export.mjs)');
+} else if (homeScene) {
+  pass('ROTARY_UI_HAS_SCENE_Home gesetzt');
+}
+
 const partCount = text.match(/#define ROTARY_UI_HOME_PART_COUNT (\d+)/);
 if (!partCount) {
   fail('ROTARY_UI_HOME_PART_COUNT fehlt');
@@ -45,13 +52,13 @@ if (!partCount) {
   pass(`ROTARY_UI_HOME_PART_COUNT = ${partCount[1]}`);
 }
 
-const homeScene = text.match(/scene\(\d+, "Home", (\d+), (\d+)\)/);
-if (!homeScene) {
+const homeSceneCount = text.match(/scene\(\d+, "Home", (\d+), (\d+)\)/);
+if (!homeSceneCount) {
   fail('Home-Szene in scenes() nicht gefunden');
-} else if (Number(homeScene[2]) < 14) {
-  fail(`Home-Szene hat nur ${homeScene[2]} Parts (erwartet 14) — patch erneut ausführen`);
+} else if (Number(homeSceneCount[2]) < 14) {
+  fail(`Home-Szene hat nur ${homeSceneCount[2]} Parts (erwartet 14) — patch erneut ausführen`);
 } else {
-  pass(`Home-Szene: start=${homeScene[1]}, count=${homeScene[2]}`);
+  pass(`Home-Szene: start=${homeSceneCount[1]}, count=${homeSceneCount[2]}`);
 }
 
 if (!text.includes('renderHomeScene')) {
