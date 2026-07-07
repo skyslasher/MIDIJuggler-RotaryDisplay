@@ -114,13 +114,8 @@ void setup() {
   Serial.println("init touch");
   gTouch.begin();
   Serial.println("init transport");
-  gTransport.begin(
-      gConfig,
-      applySync,
-      onBeat);
-  gTransport.setConfigHandler([](const char* line) {
-    gConfigStore.applySerialCommand(line, &gConfig);
-  });
+  gTransport.setConfigStore(&gConfigStore, &gConfig);
+  gTransport.begin(gConfig, applySync, onBeat);
   updateNetworkStatus();
   gRenderDirty = true;
   Serial.println("ready");

@@ -16,6 +16,7 @@ Requires a running MIDIJuggler instance with the `rotary_display` module enabled
 | Build env | Transport |
 |-----------|-----------|
 | `elecrow128` (default) | USB serial + WiFi/OSC |
+| `pi-both` | USB serial + WiFi/OSC (Pi 5, production default) |
 | `elecrow128-serial` | USB serial only |
 | `pi-serial` | USB serial only (Pi 5, fixed by-id port) |
 | `elecrow128-wifi` | WiFi/OSC only |
@@ -32,7 +33,7 @@ For **USB on Raspberry Pi 5** (encoder stays on the Pi; stop MIDIJuggler first):
 
 ```bash
 sudo systemctl stop midijuggler
-pio run -e pi-serial -t upload
+pio run -e pi-both -t upload
 sudo systemctl start midijuggler
 ```
 
@@ -42,16 +43,19 @@ Or use the helper script (same steps, frees the serial port automatically):
 ./scripts/flash-pi.sh
 ```
 
+`pi-both` is the production Pi build: USB serial for clock/config plus WiFi/OSC using
+NVS-stored settings. Use `pi-serial` only when WiFi must be disabled at compile time.
+
 If upload fails with **"The chip stopped responding"**, ensure MIDIJuggler is stopped,
-unplug/replug USB once, then retry. The `pi-serial` env uses a slower upload speed and
+unplug/replug USB once, then retry. The `pi-both` env uses a slower upload speed and
 `esp-builtin` over USB-JTAG for reliability. As a fallback:
 
 ```bash
 sudo systemctl stop midijuggler
-pio run -e pi-serial -t upload --upload-speed 115200
+pio run -e pi-both -t upload --upload-speed 115200
 ```
 
-The `pi-serial` environment sets `upload_port` / `monitor_port` in
+The `pi-both` environment sets `upload_port` / `monitor_port` in
 `platformio.ini` at the repo root. Adjust the by-id path there if your
 device ID differs (`ls /dev/serial/by-id/`).
 
@@ -89,15 +93,34 @@ sync 120.0 1 0 quarter
 beat 1.0
 ```
 
-Configuration over serial:
+Configuration over serial (always accepted on USB; persisted with `config apply`):
 
 ```
-host midijuggler.local
-port 9000
-transport serial
-transport wifi
-transport both
+config get
+config apply
+config reset
+reboot
+wifi_enabled on|off
+wifi ssid <value>
+wifi pass <value>
+wifi clear
+wifi portal
+host <value>
+port <n>
+listen_port <n>
+transport serial|wifi|both
 ```
+
+`config get` returns `cfg …` lines (password masked as `wifi_pass=***`) and ends with
+`ok`. Staged values are held in memory until `config apply` writes NVS and reconnects
+WiFi/OSC. Use the helper:
+
+```bash
+python3 scripts/rotary_config.py /dev/ttyACM0 get
+python3 scripts/rotary_config.py /dev/ttyACM0 apply host midijuggler.local transport both
+```
+
+Legacy one-line host/port/transport commands still work and stage values the same way.
 
 ## UI
 

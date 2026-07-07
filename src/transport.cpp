@@ -1,5 +1,6 @@
 #include "transport.h"
 
+#include <ESP.h>
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <WiFiUdp.h>
@@ -90,110 +91,123 @@ void sendOscTrigger(const char* host, uint16_t port, const char* address) {
 
 }  // namespace
 
-void Transport::begin(const DeviceConfig& config, SyncCallback onSync, BeatCallback onBeat) {
-  onSync_ = std::move(onSync);
-  onBeat_ = std::move(onBeat);
+void Transport::setConfigStore(ConfigStore* store, DeviceConfig* config) {
+  configStore_ = store;
+  deviceConfig_ = config;
+}
+
+void Transport::applyConfig(const DeviceConfig& config, bool runWifiPortal) {
   strlcpy(host_, config.host, sizeof(host_));
   oscPort_ = config.oscPort;
   listenPort_ = config.listenPort;
-  useSerial_ = config.transport != TransportMode::Wifi;
-  useWifi_ = config.transport != TransportMode::Serial;
+  useSerialClock_ = config.transport != TransportMode::Wifi;
+  useWifiClock_ = config.transport != TransportMode::Serial;
+  wifiEnabled_ = config.wifiEnabled;
 
-  if (useWifi_) {
-    WiFiManager manager;
-    manager.setConfigPortalTimeout(120);
-    manager.autoConnect("RotaryDisplay-Setup");
-    if (WiFi.status() == WL_CONNECTED) {
-      gRx.begin(listenPort_);
-      sendOscHelloPacket(host_, oscPort_, WiFi.localIP().toString().c_str(), listenPort_);
-    }
+  if (useWifiClock_ && wifiEnabled_) {
+    connectWifi(config, runWifiPortal);
+  } else {
+    disconnectWifi();
   }
-  if (useSerial_) {
+}
+
+void Transport::begin(const DeviceConfig& config, SyncCallback onSync, BeatCallback onBeat) {
+  onSync_ = std::move(onSync);
+  onBeat_ = std::move(onBeat);
+  applyConfig(config, false);
+
+  if (useSerialClock_) {
     lastHelloMs_ = millis();
     sendSerialLine("hello");
+  }
+  if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
+    sendOscHello();
   }
 }
 
 void Transport::loop() {
-  if (useSerial_) {
-    pollSerial();
+  pollSerial();
+
+  if (wifiPortalPending_ && deviceConfig_ != nullptr) {
+    wifiPortalPending_ = false;
+    applyConfig(*deviceConfig_, true);
+  }
+
+  if (useSerialClock_) {
     const uint32_t now = millis();
     if (now - lastHelloMs_ >= 3000) {
       lastHelloMs_ = now;
       sendSerialLine("hello");
     }
   }
-  if (useWifi_ && WiFi.status() == WL_CONNECTED) {
+  if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
     pollOsc();
   }
 }
 
 void Transport::sendBpm(float bpm) {
-  char line[32];
-  snprintf(line, sizeof(line), "bpm %.1f", bpm);
-  sendSerialLine(line);
-  if (useWifi_ && WiFi.status() == WL_CONNECTED) {
+  if (useSerialClock_) {
+    char line[32];
+    snprintf(line, sizeof(line), "bpm %.1f", bpm);
+    sendSerialLine(line);
+  }
+  if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
     sendOscFloat(host_, oscPort_, kBpmAddress, bpm);
   }
 }
 
 void Transport::sendStartStop() {
-  sendSerialLine("start_stop");
-  if (useWifi_ && WiFi.status() == WL_CONNECTED) {
+  if (useSerialClock_) {
+    sendSerialLine("start_stop");
+  }
+  if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
     sendOscTrigger(host_, oscPort_, kStartStopAddress);
   }
 }
 
 void Transport::sendClickToggle() {
-  sendSerialLine("click_toggle");
-  if (useWifi_ && WiFi.status() == WL_CONNECTED) {
+  if (useSerialClock_) {
+    sendSerialLine("click_toggle");
+  }
+  if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
     sendOscTrigger(host_, oscPort_, kClickToggleAddress);
   }
 }
 
 void Transport::sendInterval(const char* interval) {
-  char line[32];
-  snprintf(line, sizeof(line), "interval %s", interval);
-  sendSerialLine(line);
-  if (useWifi_ && WiFi.status() == WL_CONNECTED) {
+  if (useSerialClock_) {
+    char line[32];
+    snprintf(line, sizeof(line), "interval %s", interval);
+    sendSerialLine(line);
+  }
+  if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
     sendOscString(host_, oscPort_, kIntervalAddress, interval);
   }
 }
 
 void Transport::sendTapTempo() {
-  sendSerialLine("tap_tempo");
-  if (useWifi_ && WiFi.status() == WL_CONNECTED) {
+  if (useSerialClock_) {
+    sendSerialLine("tap_tempo");
+  }
+  if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
     sendOscTrigger(host_, oscPort_, kTapTempoAddress);
   }
 }
 
 void Transport::sendHello() {
-  if (useSerial_) {
+  if (useSerialClock_) {
     sendSerialLine("hello");
   }
-  if (useWifi_ && WiFi.status() == WL_CONNECTED) {
-    sendOscHelloPacket(host_, oscPort_, WiFi.localIP().toString().c_str(), listenPort_);
+  if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
+    sendOscHello();
   }
-}
-
-void Transport::handleSerialConfigLine(const char* line) {
-  if (configHandler_) {
-    configHandler_(line);
-  }
-  if (strncmp(line, "host ", 5) == 0) {
-    strlcpy(host_, line + 5, sizeof(host_));
-  } else if (strncmp(line, "port ", 5) == 0) {
-    oscPort_ = static_cast<uint16_t>(atoi(line + 5));
-  }
-}
-
-void Transport::setConfigHandler(std::function<void(const char* line)> handler) {
-  configHandler_ = std::move(handler);
 }
 
 bool Transport::isWifiConnected() const {
-  return useWifi_ && WiFi.status() == WL_CONNECTED;
+  return useWifiClock_ && wifiEnabled_ && WiFi.status() == WL_CONNECTED;
 }
+
+bool Transport::isWifiEnabled() const { return wifiEnabled_; }
 
 const char* Transport::wifiSsid() const {
   if (!isWifiConnected()) {
@@ -202,9 +216,20 @@ const char* Transport::wifiSsid() const {
   return WiFi.SSID().c_str();
 }
 
-const char* Transport::oscHost() const {
-  return host_;
+const char* Transport::wifiStatus() const {
+  if (!wifiEnabled_) {
+    return "disabled";
+  }
+  if (!useWifiClock_) {
+    return "transport-serial";
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    return "connected";
+  }
+  return "disconnected";
 }
+
+const char* Transport::oscHost() const { return host_; }
 
 bool Transport::isOscConnected() const {
   if (!isWifiConnected()) {
@@ -217,22 +242,137 @@ bool Transport::isOscConnected() const {
 }
 
 void Transport::sendSerialLine(const char* line) {
-  if (!useSerial_) {
+  if (!useSerialClock_) {
     return;
   }
   Serial.println(line);
 }
 
-void Transport::sendOscAddress(const char* address) {
-  if (useWifi_ && WiFi.status() == WL_CONNECTED) {
-    sendOscTrigger(host_, oscPort_, address);
+void Transport::sendConfigLine(const char* line) { Serial.println(line); }
+
+void Transport::sendConfigError(const char* reason) {
+  char line[96];
+  snprintf(line, sizeof(line), "err %s", reason);
+  sendConfigLine(line);
+}
+
+void Transport::emitConfigGet() {
+  if (deviceConfig_ == nullptr) {
+    sendConfigError("no config");
+    return;
+  }
+  const DeviceConfig& config = *deviceConfig_;
+  char line[96];
+
+  snprintf(line, sizeof(line), "cfg transport=%s", ConfigStore::transportName(config.transport));
+  sendConfigLine(line);
+  snprintf(line, sizeof(line), "cfg wifi_enabled=%s", config.wifiEnabled ? "on" : "off");
+  sendConfigLine(line);
+  snprintf(line, sizeof(line), "cfg wifi_ssid=%s", config.wifiSsid);
+  sendConfigLine(line);
+  sendConfigLine("cfg wifi_pass=***");
+  snprintf(line, sizeof(line), "cfg host=%s", config.host);
+  sendConfigLine(line);
+  snprintf(line, sizeof(line), "cfg port=%u", config.oscPort);
+  sendConfigLine(line);
+  snprintf(line, sizeof(line), "cfg listen_port=%u", config.listenPort);
+  sendConfigLine(line);
+  snprintf(line, sizeof(line), "cfg pulse_enabled=%s", config.pulseEnabled ? "on" : "off");
+  sendConfigLine(line);
+  snprintf(line, sizeof(line), "cfg bpm_step=%.1f", config.bpmStep);
+  sendConfigLine(line);
+}
+
+bool Transport::handleConfigLine(const char* line) {
+  if (line == nullptr) {
+    return false;
+  }
+
+  if (strcmp(line, "config get") == 0) {
+    emitConfigGet();
+    sendConfigLine("ok");
+    return true;
+  }
+
+  if (strcmp(line, "config apply") == 0) {
+    if (configStore_ == nullptr || deviceConfig_ == nullptr) {
+      sendConfigError("no store");
+      return true;
+    }
+    configStore_->save(*deviceConfig_);
+    applyConfig(*deviceConfig_, false);
+    sendConfigLine("ok");
+    return true;
+  }
+
+  if (strcmp(line, "config reset") == 0) {
+    if (configStore_ == nullptr || deviceConfig_ == nullptr) {
+      sendConfigError("no store");
+      return true;
+    }
+    configStore_->resetDefaults(deviceConfig_);
+    configStore_->save(*deviceConfig_);
+    applyConfig(*deviceConfig_, false);
+    sendConfigLine("ok");
+    return true;
+  }
+
+  if (strcmp(line, "reboot") == 0) {
+    sendConfigLine("ok");
+    delay(100);
+    ESP.restart();
+    return true;
+  }
+
+  if (strcmp(line, "wifi portal") == 0) {
+    wifiPortalPending_ = true;
+    sendConfigLine("ok");
+    return true;
+  }
+
+  if (deviceConfig_ != nullptr && configStore_ != nullptr &&
+      configStore_->stageSerialCommand(line, deviceConfig_)) {
+    sendConfigLine("ok");
+    return true;
+  }
+
+  return false;
+}
+
+void Transport::connectWifi(const DeviceConfig& config, bool runPortal) {
+  gRx.stop();
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_STA);
+
+  if (runPortal || config.wifiSsid[0] == '\0') {
+    WiFiManager manager;
+    manager.setConfigPortalTimeout(120);
+    manager.autoConnect("RotaryDisplay-Setup");
+  } else {
+    WiFi.begin(config.wifiSsid, config.wifiPass);
+    const uint32_t deadline = millis() + 15000;
+    while (WiFi.status() != WL_CONNECTED && millis() < deadline) {
+      delay(100);
+    }
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    gRx.begin(listenPort_);
   }
 }
 
+void Transport::disconnectWifi() {
+  gRx.stop();
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+}
+
 void Transport::sendOscBpm(float bpm) { sendOscFloat(host_, oscPort_, kBpmAddress, bpm); }
+
 void Transport::sendOscInterval(const char* interval) {
   sendOscString(host_, oscPort_, kIntervalAddress, interval);
 }
+
 void Transport::sendOscHello() {
   sendOscHelloPacket(host_, oscPort_, WiFi.localIP().toString().c_str(), listenPort_);
 }
@@ -332,11 +472,10 @@ void Transport::dispatchLine(const char* line) {
   if (line == nullptr || line[0] == '#') {
     return;
   }
-  if (strncmp(line, "host ", 5) == 0 || strncmp(line, "port ", 5) == 0 ||
-      strncmp(line, "transport ", 10) == 0) {
-    handleSerialConfigLine(line);
+  if (handleConfigLine(line)) {
     return;
   }
+
   SyncPayload payload;
   float beat = 0.0f;
   if (parseSyncLine(line, &payload)) {

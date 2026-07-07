@@ -46,10 +46,10 @@ if [[ -f include/RotaryUi.h ]] && command -v node >/dev/null 2>&1; then
   node scripts/verify-rotary-ui.mjs include/RotaryUi.h
 fi
 
-echo "Uploading firmware (env pi-serial)..."
+echo "Uploading firmware (env pi-both)..."
 # display_ui.cpp #ifdefs depend on RotaryUi.h; force recompile after header export/patch.
-rm -f .pio/build/pi-serial/src/display_ui.cpp.o
-pio run -e pi-serial -t upload
+rm -f .pio/build/pi-both/src/display_ui.cpp.o
+pio run -e pi-both -t upload
 
 echo "Starting midijuggler..."
 sudo systemctl start midijuggler 2>/dev/null || true

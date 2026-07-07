@@ -16,9 +16,64 @@ TransportMode parseTransport(int value) {
   return TransportMode::Both;
 }
 
+bool parseOnOff(const char* value, bool* out) {
+  if (value == nullptr || out == nullptr) {
+    return false;
+  }
+  if (strcmp(value, "1") == 0 || strcasecmp(value, "on") == 0 || strcasecmp(value, "true") == 0) {
+    *out = true;
+    return true;
+  }
+  if (strcmp(value, "0") == 0 || strcasecmp(value, "off") == 0 || strcasecmp(value, "false") == 0) {
+    *out = false;
+    return true;
+  }
+  return false;
+}
+
+void copyRestOfLine(const char* line, size_t prefixLen, char* dest, size_t destSize) {
+  if (line == nullptr || dest == nullptr || destSize == 0) {
+    return;
+  }
+  while (line[prefixLen] == ' ') {
+    prefixLen++;
+  }
+  strlcpy(dest, line + prefixLen, destSize);
+}
+
 }  // namespace
 
 void ConfigStore::begin() { prefs_.begin(kNamespace, false); }
+
+const char* ConfigStore::transportName(TransportMode mode) {
+  switch (mode) {
+    case TransportMode::Serial:
+      return "serial";
+    case TransportMode::Wifi:
+      return "wifi";
+    default:
+      return "both";
+  }
+}
+
+bool ConfigStore::parseTransportName(const char* name, TransportMode* out) {
+  if (name == nullptr || out == nullptr) {
+    return false;
+  }
+  if (strcasecmp(name, "serial") == 0) {
+    *out = TransportMode::Serial;
+    return true;
+  }
+  if (strcasecmp(name, "wifi") == 0) {
+    *out = TransportMode::Wifi;
+    return true;
+  }
+  if (strcasecmp(name, "both") == 0) {
+    *out = TransportMode::Both;
+    return true;
+  }
+  return false;
+}
 
 void ConfigStore::load(DeviceConfig* config) {
   if (config == nullptr) {
@@ -31,6 +86,9 @@ void ConfigStore::load(DeviceConfig* config) {
 #else
   config->transport = parseTransport(prefs_.getInt("transport", 0));
 #endif
+  config->wifiEnabled = prefs_.getBool("wifi_en", true);
+  prefs_.getString("wifi_ssid", config->wifiSsid, sizeof(config->wifiSsid));
+  prefs_.getString("wifi_pass", config->wifiPass, sizeof(config->wifiPass));
   prefs_.getString("host", config->host, sizeof(config->host));
   config->oscPort = prefs_.getUShort("osc_port", 9000);
   config->listenPort = prefs_.getUShort("listen_port", 9001);
@@ -40,6 +98,9 @@ void ConfigStore::load(DeviceConfig* config) {
 
 void ConfigStore::save(const DeviceConfig& config) {
   prefs_.putInt("transport", static_cast<int>(config.transport));
+  prefs_.putBool("wifi_en", config.wifiEnabled);
+  prefs_.putString("wifi_ssid", config.wifiSsid);
+  prefs_.putString("wifi_pass", config.wifiPass);
   prefs_.putString("host", config.host);
   prefs_.putUShort("osc_port", config.oscPort);
   prefs_.putUShort("listen_port", config.listenPort);
@@ -47,24 +108,58 @@ void ConfigStore::save(const DeviceConfig& config) {
   prefs_.putFloat("bpm_step", config.bpmStep);
 }
 
-void ConfigStore::applySerialCommand(const char* line, DeviceConfig* config) {
-  if (line == nullptr || config == nullptr) {
+void ConfigStore::resetDefaults(DeviceConfig* config) {
+  if (config == nullptr) {
     return;
   }
-  if (strncmp(line, "host ", 5) == 0) {
-    strlcpy(config->host, line + 5, sizeof(config->host));
-    save(*config);
-  } else if (strncmp(line, "port ", 5) == 0) {
-    config->oscPort = static_cast<uint16_t>(atoi(line + 5));
-    save(*config);
-  } else if (strncmp(line, "transport ", 10) == 0) {
-    if (strstr(line + 10, "serial") != nullptr) {
-      config->transport = TransportMode::Serial;
-    } else if (strstr(line + 10, "wifi") != nullptr) {
-      config->transport = TransportMode::Wifi;
-    } else {
-      config->transport = TransportMode::Both;
-    }
-    save(*config);
+  *config = DeviceConfig{};
+}
+
+bool ConfigStore::stageSerialCommand(const char* line, DeviceConfig* config) {
+  if (line == nullptr || config == nullptr) {
+    return false;
   }
+
+  if (strncmp(line, "host ", 5) == 0) {
+    copyRestOfLine(line, 5, config->host, sizeof(config->host));
+    return true;
+  }
+  if (strncmp(line, "port ", 5) == 0) {
+    config->oscPort = static_cast<uint16_t>(atoi(line + 5));
+    return true;
+  }
+  if (strncmp(line, "listen_port ", 12) == 0) {
+    config->listenPort = static_cast<uint16_t>(atoi(line + 12));
+    return true;
+  }
+  if (strncmp(line, "transport ", 10) == 0) {
+    TransportMode mode;
+    if (!parseTransportName(line + 10, &mode)) {
+      return true;
+    }
+    config->transport = mode;
+    return true;
+  }
+  if (strncmp(line, "wifi_enabled ", 13) == 0) {
+    bool enabled = false;
+    if (parseOnOff(line + 13, &enabled)) {
+      config->wifiEnabled = enabled;
+    }
+    return true;
+  }
+  if (strncmp(line, "wifi ssid ", 10) == 0) {
+    copyRestOfLine(line, 10, config->wifiSsid, sizeof(config->wifiSsid));
+    return true;
+  }
+  if (strncmp(line, "wifi pass ", 10) == 0) {
+    copyRestOfLine(line, 10, config->wifiPass, sizeof(config->wifiPass));
+    return true;
+  }
+  if (strcmp(line, "wifi clear") == 0) {
+    config->wifiSsid[0] = '\0';
+    config->wifiPass[0] = '\0';
+    return true;
+  }
+
+  return false;
 }
