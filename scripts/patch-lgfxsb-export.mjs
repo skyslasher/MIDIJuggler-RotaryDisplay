@@ -94,29 +94,6 @@ function repairAssetOrder(text) {
   return repaired.slice(0, closeIdx) + tail + marker + repaired.slice(closeIdx + marker.length);
 }
 
-if (isAlreadyPatched(src)) {
-  let repaired = repairAssetOrder(src);
-  if (swapAssets && src.includes('kAsset_') && !src.includes('LGFXSB_SWAP_ASSETS')) {
-    repaired = markAssetSwap(swapAssetArrays(repaired));
-  }
-  const parts = parsePatchedParts(repaired);
-  const scenes = computeSceneCounts(parts, parsePatchedScenes(repaired));
-  repaired = finalizeHeader(repaired, parts, scenes);
-  if (repaired !== src) {
-    fs.writeFileSync(file, repaired);
-    if (swapAssets && src.includes('kAsset_') && !src.includes('LGFXSB_SWAP_ASSETS')) {
-      console.log(`${file}: byte-swapped image assets for LovyanGFX`);
-    } else if (repaired.includes('void showHome(') && !src.includes('void showHome(')) {
-      console.log(`${file}: injected showHome() for visibility-based Home scene`);
-    } else {
-      console.log(`${file}: repaired asset function order`);
-    }
-  } else {
-    console.log(`${file}: already patched`);
-  }
-  process.exit(0);
-}
-
 function extractBlock(text, startMarker, endMarker) {
   const start = text.indexOf(startMarker);
   if (start < 0) return null;
@@ -418,6 +395,30 @@ function partIdFromComment(comment) {
   return m ? m[1] : '';
 }
 
+if (isAlreadyPatched(src)) {
+  let repaired = repairAssetOrder(src);
+  if (swapAssets && src.includes('kAsset_') && !src.includes('LGFXSB_SWAP_ASSETS')) {
+    repaired = markAssetSwap(swapAssetArrays(repaired));
+  }
+  const parts = parsePatchedParts(repaired);
+  const scenes = computeSceneCounts(parts, parsePatchedScenes(repaired));
+  repaired = finalizeHeader(repaired, parts, scenes);
+  if (repaired !== src) {
+    fs.writeFileSync(file, repaired);
+    if (swapAssets && src.includes('kAsset_') && !src.includes('LGFXSB_SWAP_ASSETS')) {
+      console.log(`${file}: byte-swapped image assets for LovyanGFX`);
+    } else if (repaired.includes('void showHome(') && !src.includes('void showHome(')) {
+      console.log(`${file}: injected showHome() for visibility-based Home scene`);
+    } else {
+      console.log(`${file}: repaired header`);
+    }
+  } else {
+    console.log(`${file}: already patched`);
+  }
+  process.exit(0);
+}
+
+const partsBlock = extractBlock(src, 'static const lgfxsb::PartDesc kParts[] = {', '};');
 const scenesBlock = extractBlock(src, 'static const lgfxsb::SceneDesc kScenes[] = {', '};');
 const layoutsBlock = extractBlock(src, 'static const lgfxsb::PartLayout kLayouts[] = {', '};');
 const profilesBlock = extractBlock(src, 'static const lgfxsb::ProfileDesc kProfiles[] = {', '};');
