@@ -49,8 +49,10 @@ class Transport {
   size_t serialLength_ = 0;
   uint32_t lastHelloMs_ = 0;
   uint32_t lastSyncMs_ = 0;
+  bool wifiRxReady_ = false;
 
   void sendSerialLine(const char* line);
+  void maintainWifi();
   void sendConfigLine(const char* line);
   void sendConfigError(const char* reason);
   void emitConfigGet();

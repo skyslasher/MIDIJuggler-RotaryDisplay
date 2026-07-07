@@ -176,13 +176,13 @@ void loop() {
     markDirty();
   }
 
-  gTransport.loop();
-  updateNetworkStatus();
-
   if (gRenderDirty || gDisplay.shouldRender(gUi)) {
     gDisplay.render(gUi);
     gRenderDirty = false;
   }
+
+  gTransport.loop();
+  updateNetworkStatus();
 
   gLeds.tick();
   delay(4);

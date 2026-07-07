@@ -130,7 +130,9 @@ void Transport::loop() {
 
   if (wifiPortalPending_ && deviceConfig_ != nullptr) {
     wifiPortalPending_ = false;
-    applyConfig(*deviceConfig_, true);
+    connectWifi(*deviceConfig_, true);
+  } else {
+    maintainWifi();
   }
 
   if (useSerialClock_) {
@@ -341,28 +343,58 @@ bool Transport::handleConfigLine(const char* line) {
 
 void Transport::connectWifi(const DeviceConfig& config, bool runPortal) {
   gRx.stop();
+  wifiRxReady_ = false;
   WiFi.disconnect(true);
+
+  if (!wifiEnabled_) {
+    WiFi.mode(WIFI_OFF);
+    return;
+  }
+
   WiFi.mode(WIFI_STA);
 
-  if (runPortal || config.wifiSsid[0] == '\0') {
+  if (runPortal) {
     WiFiManager manager;
     manager.setConfigPortalTimeout(120);
     manager.autoConnect("RotaryDisplay-Setup");
-  } else {
-    WiFi.begin(config.wifiSsid, config.wifiPass);
-    const uint32_t deadline = millis() + 15000;
-    while (WiFi.status() != WL_CONNECTED && millis() < deadline) {
-      delay(100);
+    if (WiFi.status() == WL_CONNECTED) {
+      gRx.begin(listenPort_);
+      wifiRxReady_ = true;
     }
+    return;
   }
 
-  if (WiFi.status() == WL_CONNECTED) {
-    gRx.begin(listenPort_);
+  if (config.wifiSsid[0] == '\0') {
+    Serial.println("wifi: no SSID configured, skipping connect (use wifi portal)");
+    return;
   }
+
+  WiFi.begin(config.wifiSsid, config.wifiPass);
+  Serial.printf("wifi: connecting to %s (non-blocking)\n", config.wifiSsid);
+}
+
+void Transport::maintainWifi() {
+  if (!useWifiClock_ || !wifiEnabled_) {
+    return;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    if (wifiRxReady_) {
+      gRx.stop();
+      wifiRxReady_ = false;
+    }
+    return;
+  }
+  if (wifiRxReady_) {
+    return;
+  }
+  gRx.begin(listenPort_);
+  wifiRxReady_ = true;
+  sendOscHello();
 }
 
 void Transport::disconnectWifi() {
   gRx.stop();
+  wifiRxReady_ = false;
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
 }

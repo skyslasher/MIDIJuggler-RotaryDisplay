@@ -361,6 +361,9 @@ void DisplayUi::render(const UiState& state) {
     }
     showingBoot_ = false;
     ready_ = false;
+#if defined(ROTARY_UI_HOME_DEBUG)
+    Serial.println("display: boot finished, rendering home");
+#endif
   }
 
   if (!stateChanged(state)) {
