@@ -20,7 +20,7 @@ fi
 cd "$ROOT"
 
 if [[ -f include/RotaryUi.h ]] && command -v node >/dev/null 2>&1; then
-  echo "Patching LGFXScreenBuilder export for ESP32 GCC..."
+  echo "Checking LGFXScreenBuilder export for ESP32 GCC..."
   node scripts/patch-lgfxsb-export.mjs include/RotaryUi.h
 fi
 

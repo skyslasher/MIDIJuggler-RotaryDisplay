@@ -22,6 +22,12 @@ if (!file) {
 
 const src = fs.readFileSync(file, 'utf8');
 
+function isAlreadyPatched(text) {
+  if (text.includes('LGFXSB_ESP32_PATCHED')) return true;
+  return text.includes('inline const lgfxsb::PartDesc* parts()') &&
+         !text.includes('static const lgfxsb::PartDesc kParts[]');
+}
+
 function extractBalancedFn(text, signature) {
   const start = text.indexOf(signature);
   if (start < 0) return null;
@@ -88,7 +94,7 @@ function repairAssetOrder(text) {
   return repaired.slice(0, closeIdx) + tail + marker + repaired.slice(closeIdx + marker.length);
 }
 
-if (src.includes('LGFXSB_ESP32_PATCHED')) {
+if (isAlreadyPatched(src)) {
   let repaired = repairAssetOrder(src);
   if (swapAssets && src.includes('kAsset_') && !src.includes('LGFXSB_SWAP_ASSETS')) {
     repaired = markAssetSwap(swapAssetArrays(repaired));

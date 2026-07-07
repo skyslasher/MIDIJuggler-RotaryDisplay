@@ -1,5 +1,7 @@
 #pragma once
 
+// LGFXSB_ESP32_PATCHED — hand-maintained factory helpers (Boot + Home scenes).
+
 #define ROTARY_UI_PART_COUNT 6
 #define ROTARY_UI_PROFILE_COUNT 3
 #define ROTARY_UI_HAS_SCENE_Boot 1
