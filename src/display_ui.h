@@ -2,15 +2,30 @@
 
 #include "display_panel.h"
 
+enum class SettingsPage : uint8_t {
+  Bpm = 0,
+  Click = 1,
+  Pulse = 2,
+  Interval = 3,
+  Network = 4,
+  Count = 5,
+};
+
 struct UiState {
   float displayedBpm = 120.0f;
   float confirmedBpm = 120.0f;
   bool editing = false;
+  bool editingInterval = false;
   bool running = false;
   bool clickEnabled = false;
   bool pulseEnabled = true;
   int settingsPage = 0;
   char clickInterval[16] = "quarter";
+  char displayedInterval[16] = "quarter";
+  bool wifiConnected = false;
+  char wifiSsid[33] = "";
+  char oscHost[48] = "";
+  bool oscConnected = false;
 };
 
 class DisplayUi {
@@ -20,9 +35,12 @@ class DisplayUi {
   void setMessage(const char* message);
 
  private:
-  void drawStatus(const UiState& state);
-  void drawBpmCard(const UiState& state);
-  void drawSettings(const UiState& state);
+  void drawPage(const UiState& state);
+  void drawBpmPage(const UiState& state);
+  void drawClickPage(const UiState& state);
+  void drawPulsePage(const UiState& state);
+  void drawIntervalPage(const UiState& state);
+  void drawNetworkPage(const UiState& state);
   void drawFooter();
   void pushFull();
 

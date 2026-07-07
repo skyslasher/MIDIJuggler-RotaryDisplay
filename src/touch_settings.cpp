@@ -1,11 +1,17 @@
 #include "touch_settings.h"
 
 #include "board.h"
+#include "display_ui.h"
 
 namespace {
 
 constexpr uint8_t kTouchAddr = 0x15;
 constexpr int kSwipeThreshold = 40;
+constexpr int kPageCount = static_cast<int>(SettingsPage::Count);
+
+int wrapPage(int page, int delta) {
+  return (page + delta + kPageCount) % kPageCount;
+}
 
 }  // namespace
 
@@ -53,12 +59,13 @@ void TouchSettings::loop(UiState* state, const ActionCallback& onAction) {
       const int dx = lastX - startX;
       const int dy = lastY - startY;
       if (abs(dx) > kSwipeThreshold && abs(dx) >= abs(dy)) {
-        if (dx > 0 && state->settingsPage > 0) {
-          state->settingsPage -= 1;
-        } else if (dx < 0 && state->settingsPage < 2) {
-          state->settingsPage += 1;
+        if (dx > 0) {
+          state->settingsPage = wrapPage(state->settingsPage, 1);
+        } else {
+          state->settingsPage = wrapPage(state->settingsPage, -1);
         }
-      } else if (abs(dx) <= kSwipeThreshold && lastY > 150) {
+      } else if (abs(dx) <= kSwipeThreshold && abs(dy) <= kSwipeThreshold &&
+                 state->settingsPage == static_cast<int>(SettingsPage::Bpm)) {
         onAction(state->settingsPage, true);
       }
     }

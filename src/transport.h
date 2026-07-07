@@ -22,9 +22,14 @@ class Transport {
   void sendStartStop();
   void sendClickToggle();
   void sendInterval(const char* interval);
+  void sendTapTempo();
   void sendHello();
   void handleSerialConfigLine(const char* line);
   void setConfigHandler(std::function<void(const char* line)> handler);
+  bool isWifiConnected() const;
+  const char* wifiSsid() const;
+  const char* oscHost() const;
+  bool isOscConnected() const;
 
  private:
   bool useWifi_ = true;
@@ -37,6 +42,7 @@ class Transport {
   char serialLine_[96] = "";
   size_t serialLength_ = 0;
   uint32_t lastHelloMs_ = 0;
+  uint32_t lastSyncMs_ = 0;
   std::function<void(const char* line)> configHandler_;
 
   void sendSerialLine(const char* line);

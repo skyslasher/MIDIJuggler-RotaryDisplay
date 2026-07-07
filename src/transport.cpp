@@ -10,6 +10,7 @@ constexpr const char* kBpmAddress = "/midijuggler/clock/bpm";
 constexpr const char* kStartStopAddress = "/midijuggler/clock/start_stop";
 constexpr const char* kClickToggleAddress = "/midijuggler/clock/click_toggle";
 constexpr const char* kIntervalAddress = "/midijuggler/clock/click_interval";
+constexpr const char* kTapTempoAddress = "/midijuggler/clock/tap_tempo";
 constexpr const char* kHelloAddress = "/midijuggler/rotary/hello";
 constexpr const char* kSyncAddress = "/midijuggler/rotary/sync";
 constexpr const char* kBeatAddress = "/midijuggler/rotary/beat";
@@ -159,6 +160,13 @@ void Transport::sendInterval(const char* interval) {
   }
 }
 
+void Transport::sendTapTempo() {
+  sendSerialLine("tap_tempo");
+  if (useWifi_ && WiFi.status() == WL_CONNECTED) {
+    sendOscTrigger(host_, oscPort_, kTapTempoAddress);
+  }
+}
+
 void Transport::sendHello() {
   if (useSerial_) {
     sendSerialLine("hello");
@@ -181,6 +189,31 @@ void Transport::handleSerialConfigLine(const char* line) {
 
 void Transport::setConfigHandler(std::function<void(const char* line)> handler) {
   configHandler_ = std::move(handler);
+}
+
+bool Transport::isWifiConnected() const {
+  return useWifi_ && WiFi.status() == WL_CONNECTED;
+}
+
+const char* Transport::wifiSsid() const {
+  if (!isWifiConnected()) {
+    return "";
+  }
+  return WiFi.SSID().c_str();
+}
+
+const char* Transport::oscHost() const {
+  return host_;
+}
+
+bool Transport::isOscConnected() const {
+  if (!isWifiConnected()) {
+    return false;
+  }
+  if (lastSyncMs_ == 0) {
+    return false;
+  }
+  return millis() - lastSyncMs_ < 10000;
 }
 
 void Transport::sendSerialLine(const char* line) {
@@ -267,6 +300,7 @@ void Transport::pollOsc() {
             sizeof(payload.clickInterval));
   }
   if (onSync_) {
+    lastSyncMs_ = millis();
     onSync_(payload);
   }
 }
@@ -306,6 +340,7 @@ void Transport::dispatchLine(const char* line) {
   SyncPayload payload;
   float beat = 0.0f;
   if (parseSyncLine(line, &payload)) {
+    lastSyncMs_ = millis();
     if (onSync_) {
       onSync_(payload);
     }

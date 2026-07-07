@@ -10,9 +10,6 @@
 
 namespace {
 
-constexpr const char* kIntervals[] = {"sixteenth", "eighth", "quarter", "half", "whole"};
-constexpr size_t kIntervalCount = sizeof(kIntervals) / sizeof(kIntervals[0]);
-
 DisplayUi gDisplay;
 EncoderFsm gEncoder;
 LedRing gLeds;
@@ -25,45 +22,19 @@ bool gRenderDirty = true;
 
 void markDirty() { gRenderDirty = true; }
 
-const char* nextInterval(const char* current) {
-  size_t index = 2;
-  for (size_t i = 0; i < kIntervalCount; ++i) {
-    if (strcmp(current, kIntervals[i]) == 0) {
-      index = i;
-      break;
-    }
+void updateNetworkStatus() {
+  const bool wifiConnected = gTransport.isWifiConnected();
+  const char* ssid = gTransport.wifiSsid();
+  const char* host = gTransport.oscHost();
+  const bool oscConnected = gTransport.isOscConnected();
+  if (gUi.wifiConnected != wifiConnected || strcmp(gUi.wifiSsid, ssid) != 0 ||
+      strcmp(gUi.oscHost, host) != 0 || gUi.oscConnected != oscConnected) {
+    gUi.wifiConnected = wifiConnected;
+    strlcpy(gUi.wifiSsid, ssid, sizeof(gUi.wifiSsid));
+    strlcpy(gUi.oscHost, host, sizeof(gUi.oscHost));
+    gUi.oscConnected = oscConnected;
+    markDirty();
   }
-  return kIntervals[(index + 1) % kIntervalCount];
-}
-
-const char* prevInterval(const char* current) {
-  size_t index = 2;
-  for (size_t i = 0; i < kIntervalCount; ++i) {
-    if (strcmp(current, kIntervals[i]) == 0) {
-      index = i;
-      break;
-    }
-  }
-  return kIntervals[(index + kIntervalCount - 1) % kIntervalCount];
-}
-
-void applyIntervalStep(int steps) {
-  if (steps == 0) {
-    return;
-  }
-  const char* current = gUi.clickInterval;
-  if (steps > 0) {
-    for (int i = 0; i < steps; ++i) {
-      current = nextInterval(current);
-    }
-  } else {
-    for (int i = 0; i > steps; --i) {
-      current = prevInterval(current);
-    }
-  }
-  strlcpy(gUi.clickInterval, current, sizeof(gUi.clickInterval));
-  gTransport.sendInterval(gUi.clickInterval);
-  markDirty();
 }
 
 void applySync(const SyncPayload& payload) {
@@ -75,36 +46,42 @@ void applySync(const SyncPayload& payload) {
     gUi.displayedBpm = payload.bpm;
     gEncoder.onSyncBpm(payload.bpm);
   }
-  if (gUi.running != payload.running || gUi.clickEnabled != payload.clickEnabled ||
-      strcmp(gUi.clickInterval, payload.clickInterval) != 0) {
+  if (!gEncoder.isEditingInterval()) {
+    if (strcmp(gUi.clickInterval, payload.clickInterval) != 0 ||
+        strcmp(gUi.displayedInterval, payload.clickInterval) != 0) {
+      markDirty();
+    }
+    strlcpy(gUi.clickInterval, payload.clickInterval, sizeof(gUi.clickInterval));
+    strlcpy(gUi.displayedInterval, payload.clickInterval, sizeof(gUi.displayedInterval));
+    gEncoder.onSyncInterval(payload.clickInterval);
+  }
+  if (gUi.running != payload.running || gUi.clickEnabled != payload.clickEnabled) {
     markDirty();
   }
   gUi.running = payload.running;
   gUi.clickEnabled = payload.clickEnabled;
-  strlcpy(gUi.clickInterval, payload.clickInterval, sizeof(gUi.clickInterval));
 }
 
 void onBeat(float beat) {
   gLeds.pulse(gUi.pulseEnabled, beat);
 }
 
-void handleSettingsAction(int page, bool tap) {
-  if (!tap) {
+void handleTouchAction(int page, bool tap) {
+  if (!tap || page != static_cast<int>(SettingsPage::Bpm)) {
     return;
   }
-  switch (page) {
-    case 0:
-      gTransport.sendClickToggle();
-      break;
-    case 1:
-      gUi.pulseEnabled = !gUi.pulseEnabled;
-      gConfig.pulseEnabled = gUi.pulseEnabled;
-      gConfigStore.save(gConfig);
-      markDirty();
-      break;
-    default:
-      applyIntervalStep(1);
-      break;
+  gTransport.sendTapTempo();
+}
+
+void cancelIntervalEditOnPageChange(int previousPage) {
+  if (previousPage != static_cast<int>(SettingsPage::Interval) ||
+      gUi.settingsPage == previousPage) {
+    return;
+  }
+  if (gEncoder.isEditingInterval()) {
+    gEncoder.cancelIntervalEdit();
+    strlcpy(gUi.displayedInterval, gUi.clickInterval, sizeof(gUi.displayedInterval));
+    markDirty();
   }
 }
 
@@ -123,6 +100,8 @@ void setup() {
   gUi.displayedBpm = 120.0f;
   gUi.confirmedBpm = 120.0f;
   strlcpy(gUi.clickInterval, "quarter", sizeof(gUi.clickInterval));
+  strlcpy(gUi.displayedInterval, "quarter", sizeof(gUi.displayedInterval));
+  strlcpy(gUi.oscHost, gConfig.host, sizeof(gUi.oscHost));
 
   Serial.println("init display");
   gDisplay.begin();
@@ -142,6 +121,7 @@ void setup() {
   gTransport.setConfigHandler([](const char* line) {
     gConfigStore.applySerialCommand(line, &gConfig);
   });
+  updateNetworkStatus();
   gRenderDirty = true;
   Serial.println("ready");
 }
@@ -151,9 +131,8 @@ void loop() {
 
   const EncoderFsm::Result encoder = gEncoder.update(gUi.settingsPage);
   gUi.editing = gEncoder.isEditing();
-  if (encoder.intervalStep != 0) {
-    applyIntervalStep(encoder.intervalStep);
-  }
+  gUi.editingInterval = gEncoder.isEditingInterval();
+
   if (encoder.bpmChanged) {
     gUi.displayedBpm = encoder.newBpm;
     markDirty();
@@ -171,13 +150,39 @@ void loop() {
   if (encoder.toggleTransport) {
     gTransport.sendStartStop();
   }
+  if (encoder.toggleClick) {
+    gTransport.sendClickToggle();
+  }
+  if (encoder.togglePulse) {
+    gUi.pulseEnabled = !gUi.pulseEnabled;
+    gConfig.pulseEnabled = gUi.pulseEnabled;
+    gConfigStore.save(gConfig);
+    markDirty();
+  }
+  if (encoder.intervalChanged) {
+    strlcpy(gUi.displayedInterval, encoder.newInterval, sizeof(gUi.displayedInterval));
+    markDirty();
+  }
+  if (encoder.cancelInterval) {
+    strlcpy(gUi.displayedInterval, encoder.newInterval, sizeof(gUi.displayedInterval));
+    markDirty();
+  }
+  if (encoder.confirmInterval) {
+    strlcpy(gUi.displayedInterval, encoder.newInterval, sizeof(gUi.displayedInterval));
+    strlcpy(gUi.clickInterval, encoder.newInterval, sizeof(gUi.clickInterval));
+    gTransport.sendInterval(encoder.newInterval);
+    markDirty();
+  }
 
-  gTouch.loop(&gUi, handleSettingsAction);
+  gTouch.loop(&gUi, handleTouchAction);
   if (gUi.settingsPage != previousPage) {
+    cancelIntervalEditOnPageChange(previousPage);
+    gUi.editingInterval = gEncoder.isEditingInterval();
     markDirty();
   }
 
   gTransport.loop();
+  updateNetworkStatus();
 
   if (gRenderDirty) {
     gDisplay.render(gUi);

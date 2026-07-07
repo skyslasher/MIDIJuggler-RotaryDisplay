@@ -12,13 +12,7 @@ constexpr uint16_t kRunning = 0x8800;
 constexpr uint16_t kOn = 0x47E0;
 constexpr uint16_t kOff = 0xFC18;
 
-constexpr int kCardCx = board::kWidth / 2;
-constexpr int kCardCy = 78;
-constexpr int kCardR = 92;
-constexpr int kSettingsY = 168;
-constexpr int kSettingsH = 72;
-constexpr int kStatusY = 0;
-constexpr int kStatusH = 28;
+constexpr int kCx = board::kWidth / 2;
 
 const char* intervalLabel(const char* interval) {
   if (strcmp(interval, "sixteenth") == 0) return "1/16";
@@ -26,6 +20,17 @@ const char* intervalLabel(const char* interval) {
   if (strcmp(interval, "half") == 0) return "1/2";
   if (strcmp(interval, "whole") == 0) return "1/1";
   return "1/4";
+}
+
+void drawStatusChip(lgfx::LGFX_Sprite* canvas, int x, int y, int w, const char* label,
+                    const char* value, uint16_t valueColor) {
+  canvas->fillRoundRect(x, y, w, 36, 8, kPanel);
+  canvas->setFont(&fonts::Font0);
+  canvas->setTextDatum(textdatum_t::top_center);
+  canvas->setTextColor(TFT_WHITE, kPanel);
+  canvas->drawString(label, x + w / 2, y + 4);
+  canvas->setTextColor(valueColor, kPanel);
+  canvas->drawString(value, x + w / 2, y + 20);
 }
 
 }  // namespace
@@ -54,57 +59,141 @@ void DisplayUi::pushFull() {
   lcd_.startWrite();
 }
 
-void DisplayUi::drawStatus(const UiState& state) {
-  canvas_.fillRect(0, kStatusY, board::kWidth, kStatusH, kBg);
+void DisplayUi::drawBpmPage(const UiState& state) {
   canvas_.setFont(&fonts::Font2);
   canvas_.setTextDatum(textdatum_t::top_center);
   canvas_.setTextColor(TFT_WHITE, kBg);
-  canvas_.drawString(state.running ? "RUN" : "STOP", kCardCx, 8);
-}
+  canvas_.drawString(state.running ? "RUN" : "STOP", kCx, 8);
 
-void DisplayUi::drawBpmCard(const UiState& state) {
-  const int left = kCardCx - kCardR;
-  const int top = kCardCy - kCardR;
-  const int size = kCardR * 2;
-  canvas_.fillRect(left, top, size, size, kBg);
-
+  constexpr int cardCy = 88;
+  constexpr int cardR = 72;
   const uint16_t cardColor = state.running ? kRunning : kPanel;
-  canvas_.fillCircle(kCardCx, kCardCy, kCardR, cardColor);
+  canvas_.fillCircle(kCx, cardCy, cardR, cardColor);
   const uint16_t ringColor = state.editing ? kAccent : cardColor;
-  canvas_.drawCircle(kCardCx, kCardCy, kCardR, ringColor);
+  canvas_.drawCircle(kCx, cardCy, cardR, ringColor);
 
   canvas_.setTextDatum(textdatum_t::middle_center);
   canvas_.setTextColor(TFT_WHITE, cardColor);
   canvas_.setFont(&fonts::Font4);
   char bpmText[8];
   snprintf(bpmText, sizeof(bpmText), "%.0f", state.displayedBpm);
-  canvas_.drawString(bpmText, kCardCx, kCardCy);
+  canvas_.drawString(bpmText, kCx, cardCy);
+
+  canvas_.setFont(&fonts::Font0);
+  canvas_.setTextColor(TFT_WHITE, kBg);
+  canvas_.drawString("BPM", kCx, cardCy + cardR + 6);
+
+  const int chipY = 168;
+  const int chipW = 68;
+  const int gap = 6;
+  const int totalW = chipW * 3 + gap * 2;
+  const int startX = (board::kWidth - totalW) / 2;
+  drawStatusChip(&canvas_, startX, chipY, chipW, "Klick",
+                 state.clickEnabled ? "Ein" : "Aus",
+                 state.clickEnabled ? kOn : kOff);
+  drawStatusChip(&canvas_, startX + chipW + gap, chipY, chipW, "Puls",
+                 state.pulseEnabled ? "Ein" : "Aus",
+                 state.pulseEnabled ? kOn : kOff);
+  drawStatusChip(&canvas_, startX + (chipW + gap) * 2, chipY, chipW, "Intv",
+                 intervalLabel(state.clickInterval), kAccent);
 }
 
-void DisplayUi::drawSettings(const UiState& state) {
-  const int cx = kCardCx;
-  canvas_.fillRect(0, kSettingsY, board::kWidth, kSettingsH, kBg);
-  canvas_.fillRoundRect(12, kSettingsY, 216, 56, 10, kPanel);
+void DisplayUi::drawClickPage(const UiState& state) {
+  canvas_.setFont(&fonts::Font2);
+  canvas_.setTextDatum(textdatum_t::top_center);
+  canvas_.setTextColor(TFT_WHITE, kBg);
+  canvas_.drawString("Audio-Klick", kCx, 24);
+
+  canvas_.fillRoundRect(24, 72, 192, 96, 12, kPanel);
   canvas_.setTextDatum(textdatum_t::middle_center);
-  switch (state.settingsPage) {
-    case 0:
-      canvas_.setTextColor(TFT_WHITE, kPanel);
-      canvas_.drawString("Klick", cx, kSettingsY + 12);
-      canvas_.setTextColor(state.clickEnabled ? kOn : kOff, kPanel);
-      canvas_.drawString(state.clickEnabled ? "Ein" : "Aus", cx, kSettingsY + 34);
+  canvas_.setTextColor(TFT_WHITE, kPanel);
+  canvas_.setFont(&fonts::Font4);
+  canvas_.drawString(state.clickEnabled ? "Ein" : "Aus", kCx, 120);
+  canvas_.setFont(&fonts::Font0);
+  canvas_.setTextColor(state.clickEnabled ? kOn : kOff, kPanel);
+  canvas_.drawString(state.clickEnabled ? "Aktiv" : "Inaktiv", kCx, 148);
+}
+
+void DisplayUi::drawPulsePage(const UiState& state) {
+  canvas_.setFont(&fonts::Font2);
+  canvas_.setTextDatum(textdatum_t::top_center);
+  canvas_.setTextColor(TFT_WHITE, kBg);
+  canvas_.drawString("Puls", kCx, 24);
+
+  canvas_.fillRoundRect(24, 72, 192, 96, 12, kPanel);
+  canvas_.setTextDatum(textdatum_t::middle_center);
+  canvas_.setTextColor(TFT_WHITE, kPanel);
+  canvas_.setFont(&fonts::Font4);
+  canvas_.drawString(state.pulseEnabled ? "Ein" : "Aus", kCx, 120);
+  canvas_.setFont(&fonts::Font0);
+  canvas_.setTextColor(state.pulseEnabled ? kOn : kOff, kPanel);
+  canvas_.drawString(state.pulseEnabled ? "LED-Ring aktiv" : "LED-Ring aus", kCx, 148);
+}
+
+void DisplayUi::drawIntervalPage(const UiState& state) {
+  canvas_.setFont(&fonts::Font2);
+  canvas_.setTextDatum(textdatum_t::top_center);
+  canvas_.setTextColor(TFT_WHITE, kBg);
+  canvas_.drawString("Intervall", kCx, 24);
+
+  const uint16_t panelColor = state.editingInterval ? kAccent : kPanel;
+  canvas_.fillRoundRect(24, 72, 192, 96, 12, panelColor);
+  canvas_.setTextDatum(textdatum_t::middle_center);
+  canvas_.setTextColor(TFT_WHITE, panelColor);
+  canvas_.setFont(&fonts::Font7);
+  canvas_.drawString(intervalLabel(state.displayedInterval), kCx, 118);
+  canvas_.setFont(&fonts::Font0);
+  if (state.editingInterval) {
+    canvas_.drawString("Drehen / Druecken", kCx, 152);
+  }
+}
+
+void DisplayUi::drawNetworkPage(const UiState& state) {
+  canvas_.setFont(&fonts::Font2);
+  canvas_.setTextDatum(textdatum_t::top_center);
+  canvas_.setTextColor(TFT_WHITE, kBg);
+  canvas_.drawString("Netzwerk", kCx, 12);
+
+  canvas_.fillRoundRect(12, 36, 216, 88, 10, kPanel);
+  canvas_.setFont(&fonts::Font0);
+  canvas_.setTextDatum(textdatum_t::top_left);
+  canvas_.setTextColor(TFT_WHITE, kPanel);
+  canvas_.drawString("WiFi", 22, 44);
+  canvas_.drawString(state.wifiSsid[0] ? state.wifiSsid : "-", 22, 58);
+  canvas_.setTextColor(state.wifiConnected ? kOn : kOff, kPanel);
+  canvas_.drawString(state.wifiConnected ? "Verbunden" : "Getrennt", 22, 74);
+
+  canvas_.fillRoundRect(12, 132, 216, 88, 10, kPanel);
+  canvas_.setTextColor(TFT_WHITE, kPanel);
+  canvas_.drawString("OSC", 22, 140);
+  canvas_.drawString(state.oscHost[0] ? state.oscHost : "-", 22, 154);
+  canvas_.setTextColor(state.oscConnected ? kOn : kOff, kPanel);
+  canvas_.drawString(state.oscConnected ? "Sync aktiv" : "Kein Sync", 22, 170);
+}
+
+void DisplayUi::drawPage(const UiState& state) {
+  canvas_.fillScreen(kBg);
+  switch (static_cast<SettingsPage>(state.settingsPage)) {
+    case SettingsPage::Bpm:
+      drawBpmPage(state);
       break;
-    case 1:
-      canvas_.setTextColor(TFT_WHITE, kPanel);
-      canvas_.drawString("Puls", cx, kSettingsY + 12);
-      canvas_.setTextColor(state.pulseEnabled ? kOn : kOff, kPanel);
-      canvas_.drawString(state.pulseEnabled ? "Ein" : "Aus", cx, kSettingsY + 34);
+    case SettingsPage::Click:
+      drawClickPage(state);
+      break;
+    case SettingsPage::Pulse:
+      drawPulsePage(state);
+      break;
+    case SettingsPage::Interval:
+      drawIntervalPage(state);
+      break;
+    case SettingsPage::Network:
+      drawNetworkPage(state);
       break;
     default:
-      canvas_.setTextColor(TFT_WHITE, kPanel);
-      canvas_.drawString("Intervall", cx, kSettingsY + 12);
-      canvas_.drawString(intervalLabel(state.clickInterval), cx, kSettingsY + 34);
+      drawBpmPage(state);
       break;
   }
+  drawFooter();
 }
 
 void DisplayUi::drawFooter() {
@@ -113,58 +202,38 @@ void DisplayUi::drawFooter() {
   canvas_.setFont(&fonts::Font0);
   canvas_.setTextDatum(textdatum_t::bottom_center);
   canvas_.setTextColor(TFT_WHITE, kBg);
-  canvas_.drawString("< swipe >", kCardCx, board::kHeight - 4);
+  canvas_.drawString("< swipe >", kCx, board::kHeight - 4);
   if (message_[0] != '\0') {
-    canvas_.drawString(message_, kCardCx, board::kHeight - 16);
+    canvas_.drawString(message_, kCx, board::kHeight - 16);
   }
 }
 
 void DisplayUi::render(const UiState& state) {
-  if (!ready_) {
-    canvas_.fillScreen(kBg);
-    drawStatus(state);
-    drawBpmCard(state);
-    drawSettings(state);
-    drawFooter();
-    pushFull();
-    lastRendered_ = state;
-    strlcpy(lastMessage_, message_, sizeof(lastMessage_));
-    ready_ = true;
+  const bool pageChanged = lastRendered_.settingsPage != state.settingsPage;
+  const bool changed =
+      pageChanged || !ready_ ||
+      lastRendered_.displayedBpm != state.displayedBpm ||
+      lastRendered_.confirmedBpm != state.confirmedBpm ||
+      lastRendered_.editing != state.editing ||
+      lastRendered_.editingInterval != state.editingInterval ||
+      lastRendered_.running != state.running ||
+      lastRendered_.clickEnabled != state.clickEnabled ||
+      lastRendered_.pulseEnabled != state.pulseEnabled ||
+      strcmp(lastRendered_.clickInterval, state.clickInterval) != 0 ||
+      strcmp(lastRendered_.displayedInterval, state.displayedInterval) != 0 ||
+      lastRendered_.wifiConnected != state.wifiConnected ||
+      strcmp(lastRendered_.wifiSsid, state.wifiSsid) != 0 ||
+      strcmp(lastRendered_.oscHost, state.oscHost) != 0 ||
+      lastRendered_.oscConnected != state.oscConnected ||
+      strcmp(lastMessage_, message_) != 0;
+
+  if (!changed) {
     return;
   }
 
-  const bool statusChanged = lastRendered_.running != state.running;
-  const bool bpmChanged = lastRendered_.displayedBpm != state.displayedBpm ||
-                          lastRendered_.editing != state.editing || statusChanged;
-  const bool settingsChanged =
-      lastRendered_.settingsPage != state.settingsPage ||
-      lastRendered_.clickEnabled != state.clickEnabled ||
-      lastRendered_.pulseEnabled != state.pulseEnabled ||
-      strcmp(lastRendered_.clickInterval, state.clickInterval) != 0;
-  const bool footerChanged = strcmp(lastMessage_, message_) != 0;
-
-  bool changed = false;
-  if (statusChanged) {
-    drawStatus(state);
-    changed = true;
-  }
-  if (bpmChanged) {
-    drawBpmCard(state);
-    changed = true;
-  }
-  if (settingsChanged) {
-    drawSettings(state);
-    changed = true;
-  }
-  if (footerChanged) {
-    drawFooter();
-    changed = true;
-  }
-
-  if (changed) {
-    pushFull();
-  }
-
+  drawPage(state);
+  pushFull();
   lastRendered_ = state;
   strlcpy(lastMessage_, message_, sizeof(lastMessage_));
+  ready_ = true;
 }
