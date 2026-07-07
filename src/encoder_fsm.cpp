@@ -145,10 +145,20 @@ EncoderFsm::Result EncoderFsm::update(int settingsPage) {
   Result result;
   static uint8_t lastSwitch = HIGH;
 
-  consumePcnt(&result, settingsPage);
-
   const uint8_t switchState = digitalRead(board::kEncoderSwitch);
-  if (lastSwitch == HIGH && switchState == LOW) {
+  const bool switchPressed = lastSwitch == HIGH && switchState == LOW;
+  if (switchPressed || switchState == LOW) {
+    int16_t junk = 0;
+    pcnt_get_counter_value(kPcntUnit, &junk);
+    pcnt_counter_clear(kPcntUnit);
+    pcntRemainder_ = 0;
+  }
+
+  if (switchState == HIGH) {
+    consumePcnt(&result, settingsPage);
+  }
+
+  if (switchPressed) {
     switch (static_cast<SettingsPage>(settingsPage)) {
       case SettingsPage::Bpm:
         if (editing_ && rotatedWhileEditing_) {
@@ -180,6 +190,7 @@ EncoderFsm::Result EncoderFsm::update(int settingsPage) {
         break;
     }
   }
+
   lastSwitch = switchState;
 
   if (settingsPage == static_cast<int>(SettingsPage::Bpm) && editing_ &&

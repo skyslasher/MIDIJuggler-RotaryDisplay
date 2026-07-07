@@ -60,13 +60,15 @@ void DisplayUi::pushFull() {
 }
 
 void DisplayUi::drawBpmPage(const UiState& state) {
+  constexpr int statusH = 22;
+  constexpr int cardCy = 100;
+  constexpr int cardR = 68;
+
+  canvas_.fillRect(0, 0, board::kWidth, statusH, kBg);
   canvas_.setFont(&fonts::Font2);
   canvas_.setTextDatum(textdatum_t::top_center);
   canvas_.setTextColor(TFT_WHITE, kBg);
-  canvas_.drawString(state.running ? "RUN" : "STOP", kCx, 8);
-
-  constexpr int cardCy = 88;
-  constexpr int cardR = 72;
+  canvas_.drawString(state.running ? "RUN" : "STOP", kCx, 4);
   const uint16_t cardColor = state.running ? kRunning : kPanel;
   canvas_.fillCircle(kCx, cardCy, cardR, cardColor);
   const uint16_t ringColor = state.editing ? kAccent : cardColor;

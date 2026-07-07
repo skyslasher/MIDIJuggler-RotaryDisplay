@@ -15,4 +15,5 @@ class TouchSettings {
 
  private:
   bool readTouch(int* x, int* y);
+  uint8_t readGesture();
 };
