@@ -1,6 +1,7 @@
 #include "display_ui.h"
 
 #include <LovyanGFX.hpp>
+#include <LGFXVirtualCanvas.h>
 #include <LGFXScreenBuilder.h>
 
 #include "RotaryUi.h"
@@ -21,7 +22,7 @@
 #endif
 
 #if defined(ROTARY_UI_HOME_DYNAMIC) && defined(ROTARY_UI_HOME_PART_COUNT)
-#pragma message "Home render path: renderHomeScene (LGFXScreenBuilder direct lcd_)"
+#pragma message "Home render path: renderHomeScene (LGFXVirtualCanvas double-buffer)"
 #elif defined(ROTARY_UI_HAS_SCENE_Home)
 #pragma message "Home render path: show(Home) fallback (patched export missing ROTARY_UI_HOME_DYNAMIC?)"
 #endif
@@ -158,15 +159,15 @@ void DisplayUi::begin() {
   lcd_.startWrite();
   setBacklight(255);
 
-  screen_ = new RotaryUi::Screen(lcd_);
-  screen_->begin();
-  screen_->setProfile(RotaryUi::Profile::Auto);
-
 #if !defined(ROTARY_UI_NO_DOUBLE_BUFFER)
   canvas_.setColorDepth(16);
   canvas_.setPsram(true);
   canvas_.createSprite(board::kWidth, board::kHeight);
 #endif
+
+  screen_ = new RotaryUi::Screen(lcd_);
+  screen_->begin();
+  screen_->setProfile(RotaryUi::Profile::Auto);
 
   bootStartedMs_ = millis();
   showingBoot_ = true;
@@ -258,10 +259,6 @@ void DisplayUi::renderHome(const UiState& state) {
   home.bpmText = builderBpm_;
   screen_->show(home);
 #endif
-#if !defined(ROTARY_UI_NO_DOUBLE_BUFFER)
-  // Drop stale manual-page sprite pixels so a later pushFull() cannot resurrect "< swipe >".
-  canvas_.fillScreen(kBg);
-#endif
 }
 #endif
 
@@ -323,6 +320,7 @@ void DisplayUi::pushFull() {
     lcd_.endWrite();
   }
   canvas_.pushSprite(0, 0);
+  lcd_.waitDMA();
   lcd_.startWrite();
 #endif
 }
