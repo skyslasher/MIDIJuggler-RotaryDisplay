@@ -28,6 +28,10 @@ struct UiState {
   bool oscConnected = false;
 };
 
+namespace RotaryUi {
+class Screen;
+}
+
 class DisplayUi {
  public:
   void begin();
@@ -35,19 +39,17 @@ class DisplayUi {
   void setMessage(const char* message);
 
  private:
-  void drawPage(const UiState& state);
-  void drawBpmPage(const UiState& state);
-  void drawClickPage(const UiState& state);
-  void drawPulsePage(const UiState& state);
-  void drawIntervalPage(const UiState& state);
-  void drawNetworkPage(const UiState& state);
-  void drawFooter();
-  void pushFull();
+  void renderBoot();
+  void renderPage(const UiState& state);
+  bool stateChanged(const UiState& state) const;
 
   PanelDisplay lcd_;
-  lgfx::LGFX_Sprite canvas_{&lcd_};
+  RotaryUi::Screen* screen_ = nullptr;
   UiState lastRendered_{};
   char message_[48] = "";
   char lastMessage_[48] = "";
   bool ready_ = false;
+  bool showingBoot_ = true;
+  uint32_t bootStartedMs_ = 0;
+  static DisplayUi* instance_;
 };

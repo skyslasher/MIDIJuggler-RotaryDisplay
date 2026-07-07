@@ -101,7 +101,35 @@ transport both
 
 ## UI
 
-- **Rotate** encoder: edit BPM (blinks), confirm with press or revert after 5 s
-- **Press** without rotation: start/stop transport
-- **Swipe** on settings row: Klick / Puls (local) / Intervall
-- **Tap** settings row: toggle current page
+Five swipeable pages: BPM (default), Audio-Klick, Puls, Intervall, Netzwerk.
+On boot a splash screen is shown for 2 seconds.
+
+- **Rotate** encoder on BPM page: edit BPM, confirm with press or revert after 5 s
+- **Press** without rotation on BPM page: start/stop transport
+- **Swipe** left/right: change page (wraps around)
+- **Tap** on BPM page: tap tempo
+- **Press** on Klick/Puls pages: toggle setting
+- **Rotate** on Intervall page: edit interval with 5 s confirm/revert
+
+### Screen layout (LGFXScreenBuilder)
+
+The boot splash uses [LGFXScreenBuilder](https://tanakamasayuki.github.io/LGFXScreenBuilder/)
+via `include/RotaryUi.h` (included only from `src/display_ui.cpp`). Profile index 2
+is **240×240** for the Elecrow panel (`Profile::Cardputer`).
+
+The five main pages (BPM, Klick, Puls, Intervall, Netzwerk) are drawn manually in
+`src/display_ui.cpp`. Only the boot scene is rendered through LGFXScreenBuilder.
+
+To redesign the boot screen visually:
+
+1. Open the [authoring tool](https://tanakamasayuki.github.io/LGFXScreenBuilder/) (target: **LovyanGFX**)
+2. Add or edit a **240×240** profile and the `Boot` scene
+3. Export `.h` and replace `include/RotaryUi.h`
+4. If the export uses brace-initialized descriptor arrays, keep the factory-helper
+   pattern in the current header (LGFXScreenBuilder 0.2.x + ESP32 GCC) or regenerate
+   once the tool emits compatible init code
+5. Rebuild: `pio run -e elecrow128-serial -t upload`
+
+The `"Rotary Display"` subtitle under the logo is drawn in the boot overlay in
+`src/display_ui.cpp` (`bootOverlay`).
+
