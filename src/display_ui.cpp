@@ -175,11 +175,58 @@ void DisplayUi::renderBoot() {
 }
 
 #ifdef ROTARY_UI_HAS_SCENE_Home
+#if defined(ROTARY_UI_HOME_DYNAMIC) && defined(ROTARY_UI_HOME_PART_COUNT)
+namespace {
+
+void fillHomeValues(lgfxsb::Value* v, const UiState& state, const char* bpmText, const char* intervalText) {
+#ifdef ROTARY_UI_HOME_IDX_bpmAccent
+  v[ROTARY_UI_HOME_IDX_bpmAccent] = lgfxsb::Value::boolean(state.editing);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_bpmText
+  v[ROTARY_UI_HOME_IDX_bpmText] = lgfxsb::Value::text(bpmText);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_klickBgInactive
+  v[ROTARY_UI_HOME_IDX_klickBgInactive] = lgfxsb::Value::boolean(!state.clickEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_klickTextInactive
+  v[ROTARY_UI_HOME_IDX_klickTextInactive] = lgfxsb::Value::boolean(!state.clickEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_klickBgActive
+  v[ROTARY_UI_HOME_IDX_klickBgActive] = lgfxsb::Value::boolean(state.clickEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_klickTextActive
+  v[ROTARY_UI_HOME_IDX_klickTextActive] = lgfxsb::Value::boolean(state.clickEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_pulsBgInactive
+  v[ROTARY_UI_HOME_IDX_pulsBgInactive] = lgfxsb::Value::boolean(!state.pulseEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_pulsTextInactive
+  v[ROTARY_UI_HOME_IDX_pulsTextInactive] = lgfxsb::Value::boolean(!state.pulseEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_pulsBgActive
+  v[ROTARY_UI_HOME_IDX_pulsBgActive] = lgfxsb::Value::boolean(state.pulseEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_pulsTextActive
+  v[ROTARY_UI_HOME_IDX_pulsTextActive] = lgfxsb::Value::boolean(state.pulseEnabled);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_intervalBg
+  v[ROTARY_UI_HOME_IDX_intervalBg] = lgfxsb::Value::boolean(true);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_intervalText
+  v[ROTARY_UI_HOME_IDX_intervalText] = lgfxsb::Value::text(intervalText);
+#endif
+}
+
+}  // namespace
+#endif
+
 void DisplayUi::renderHome(const UiState& state) {
   snprintf(builderBpm_, sizeof(builderBpm_), "%.0f", state.displayedBpm);
   strlcpy(builderInterval_, intervalLabel(state.clickInterval), sizeof(builderInterval_));
-#ifdef ROTARY_UI_HOME_DYNAMIC
-  screen_->showHome(builderBpm_, builderInterval_, state.editing, state.clickEnabled, state.pulseEnabled);
+#if defined(ROTARY_UI_HOME_DYNAMIC) && defined(ROTARY_UI_HOME_PART_COUNT)
+  lgfxsb::Value values[ROTARY_UI_HOME_PART_COUNT]{};
+  fillHomeValues(values, state, builderBpm_, builderInterval_);
+  screen_->renderHomeScene(values, ROTARY_UI_HOME_PART_COUNT);
 #else
   RotaryUi::Scene::Home home;
   home.bpmText = builderBpm_;

@@ -100,7 +100,7 @@ if (isAlreadyPatched(src)) {
     repaired = markAssetSwap(swapAssetArrays(repaired));
   }
   const parts = parsePatchedParts(repaired);
-  const scenes = parsePatchedScenes(repaired);
+  const scenes = computeSceneCounts(parts, parsePatchedScenes(repaired));
   repaired = finalizeHeader(repaired, parts, scenes);
   if (repaired !== src) {
     fs.writeFileSync(file, repaired);
@@ -230,6 +230,50 @@ function parsePatchedScenes(text) {
   return out;
 }
 
+function computeSceneCounts(parts, scenes) {
+  return scenes.map((s, i) => {
+    const next = scenes[i + 1];
+    const actualCount = next ? next.start - s.start : parts.length - s.start;
+    return { ...s, count: actualCount };
+  });
+}
+
+function repairSceneCounts(text, parts, scenes) {
+  const fixed = computeSceneCounts(parts, scenes);
+  let out = text;
+  for (const s of fixed) {
+    out = out.replace(
+      new RegExp(`scene\\((\\d+), "${s.name}", ${s.start}, \\d+\\)`, 'g'),
+      `scene($1, "${s.name}", ${s.start}, ${s.count})`,
+    );
+  }
+  const home = fixed.find((s) => s.name === 'Home');
+  if (home) {
+    out = out.replace(/#define ROTARY_UI_HOME_PART_COUNT \d+\n/g, '');
+    if (out.includes('#define ROTARY_UI_HOME_DYNAMIC 1')) {
+      out = out.replace(
+        /#define ROTARY_UI_HOME_DYNAMIC 1\n/,
+        `#define ROTARY_UI_HOME_DYNAMIC 1\n#define ROTARY_UI_HOME_PART_COUNT ${home.count}\n`,
+      );
+    }
+    out = out.replace(/p\.partCount = \d+;/g, `p.partCount = ${parts.length};`);
+  }
+  return out;
+}
+
+function generateHomeIndexDefines(home, parts) {
+  const homeParts = parts.slice(home.start, home.start + home.count);
+  if (!homeParts.some((p) => p.id === 'klickBgInactive')) return '';
+  return `${homeParts.map((p, i) => `#define ROTARY_UI_HOME_IDX_${p.id} ${i}`).join('\n')}\n`;
+}
+
+function generateRenderHomeSceneMethod() {
+  return `
+  void renderHomeScene(const lgfxsb::Value* values, uint16_t count) {
+    renderScene(Scene::Home::id, values, count, nullptr, nullptr, nullptr);
+  }`;
+}
+
 function homePartIndex(homeParts, id) {
   return homeParts.findIndex((p) => p.id === id);
 }
@@ -282,38 +326,51 @@ ${lines.join('\n')}
 }
 
 function injectShowHome(text, parts, scenes) {
-  const home = scenes.find((s) => s.name === 'Home');
-  if (!home) return text;
+  const fixedScenes = computeSceneCounts(parts, scenes);
+  const home = fixedScenes.find((s) => s.name === 'Home');
+  if (!home) return repairSceneCounts(text, parts, scenes);
+
+  const homeParts = parts.slice(home.start, home.start + home.count);
+  if (!homeParts.some((p) => p.id === 'klickBgInactive')) {
+    return repairSceneCounts(text, parts, scenes);
+  }
 
   const method = generateShowHomeMethod(home, parts);
-  if (!method) return text;
+  const renderMethod = generateRenderHomeSceneMethod();
+  const indexDefines = generateHomeIndexDefines(home, parts);
 
   let out = text.replace(/\n  void showHome\([\s\S]*?\n  \}\n/g, '\n');
-  if (out.includes('void showHome(')) return out;
+  out = out.replace(/\n  void renderHomeScene\([\s\S]*?\n  \}\n/g, '\n');
 
+  const screenMethods = `${method}\n${renderMethod}\n`;
   if (out.match(/void setOverlay\(void \(\*\)fn\)\(Canvas&, const Scene::Home&\)\)/)) {
     out = out.replace(
       /(  void setOverlay\(void \(\*\)fn\)\(Canvas&, const Scene::Home&\)\) \{ _ov_Home = fn; \}\n)/,
-      `$1${method}\n`,
+      `$1${screenMethods}`,
     );
+  } else if (out.match(/void show\(const Scene::Home&/)) {
+    out = out.replace(/(  void show\(const Scene::Home&[\s\S]*?\n  \}\n)/, `$1${screenMethods}`);
   } else {
-    out = out.replace(/(\n};)(\n\n}  \/\/ namespace RotaryUi)/, `\n${method}\n$1$2`);
+    out = out.replace(/(\n};)(\n\n}  \/\/ namespace RotaryUi)/, `\n${screenMethods}\n$1$2`);
   }
 
-  if (!out.includes('ROTARY_UI_HOME_DYNAMIC')) {
-    if (out.includes('#define ROTARY_UI_HAS_SCENE_Home 1')) {
-      out = out.replace(
-        /#define ROTARY_UI_HAS_SCENE_Home 1\n/,
-        `#define ROTARY_UI_HAS_SCENE_Home 1\n#define ROTARY_UI_HOME_DYNAMIC 1\n#define ROTARY_UI_HOME_PART_COUNT ${home.count}\n`,
-      );
-    } else {
-      out = out.replace(
-        '#pragma once\n',
-        `#pragma once\n\n#define ROTARY_UI_HOME_DYNAMIC 1\n#define ROTARY_UI_HOME_PART_COUNT ${home.count}\n`,
-      );
-    }
+  out = out.replace(/#define ROTARY_UI_HOME_IDX_\w+ \d+\n/g, '');
+  out = out.replace(/#define ROTARY_UI_HOME_PART_COUNT \d+\n/g, '');
+  out = out.replace(/#define ROTARY_UI_HOME_DYNAMIC 1\n/g, '');
+
+  if (out.includes('#define ROTARY_UI_HAS_SCENE_Home 1')) {
+    out = out.replace(
+      /#define ROTARY_UI_HAS_SCENE_Home 1\n/,
+      `#define ROTARY_UI_HAS_SCENE_Home 1\n#define ROTARY_UI_HOME_DYNAMIC 1\n#define ROTARY_UI_HOME_PART_COUNT ${home.count}\n${indexDefines}`,
+    );
+  } else {
+    out = out.replace(
+      '#pragma once\n',
+      `#pragma once\n\n#define ROTARY_UI_HOME_DYNAMIC 1\n#define ROTARY_UI_HOME_PART_COUNT ${home.count}\n${indexDefines}`,
+    );
   }
-  return out;
+
+  return repairSceneCounts(out, parts, fixedScenes);
 }
 
 function repairUndefinedSceneIds(text) {
@@ -342,12 +399,12 @@ if (!partsBlock || !scenesBlock || !layoutsBlock || !profilesBlock || !projectBl
 }
 
 const parts = parseParts(partsBlock);
-const scenes = parseScenes(scenesBlock).map((s) => ({
+const scenes = computeSceneCounts(parts, parseScenes(scenesBlock).map((s) => ({
   id: Number(s.id),
   name: s.name,
   start: Number(s.start),
   count: Number(s.count),
-}));
+})));
 const layouts = parseLayouts(layoutsBlock);
 const profiles = parseProfiles(profilesBlock);
 const assets = assetsBlock ? parseAssets(assetsBlock) : [];
