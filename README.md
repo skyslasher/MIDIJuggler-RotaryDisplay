@@ -148,14 +148,30 @@ other pages remain manual draw in `src/display_ui.cpp`.
 LGFXScreenBuilder does **not** use a separate palette. Image assets are converted to
 **RGB565** and embedded as `kAsset_*` arrays in the exported `.h`.
 
-For a correct logo on the device:
+**Important:** The Design preview shows your **original PNG** (`dataUrl`), not the
+RGB565 data that lands on the ESP32. A perfect browser preview does not guarantee
+correct colours on the device.
+
+For a correct logo on the Elecrow panel:
 
 1. In the tool, open **Assets** and import a **true-colour PNG** (24-bit RGB or 32-bit RGBA).
-   Avoid indexed-colour / GIF palette images — convert them to PNG first.
-2. Match the asset size to the on-screen `Image` part (e.g. 240×240 full-screen boot logo).
-3. Check the preview in the **Design** tab; it approximates the device colours.
-4. Re-export, run `patch-lgfxsb-export.mjs`, and flash.
+2. Match the asset size to the on-screen `Image` part (e.g. 240×240).
+3. Export `.h`, then run:
 
-If red and blue are swapped, re-import the PNG (some editors export BGR-ordered data).
-Semi-transparent PNGs are flattened on import; use an opaque background colour if edges look wrong.
+```bash
+node scripts/patch-lgfxsb-export.mjs include/RotaryUi.h
+```
+
+The patch script also **byte-swaps** RGB565 asset pixels for LovyanGFX `pushImage()` on
+ESP32. If colours look wrong after flashing, retry with swapping disabled:
+
+```bash
+node scripts/patch-lgfxsb-export.mjs include/RotaryUi.h --no-swap-assets
+```
+
+Re-run the patch after every export (or use `./scripts/flash-pi.sh`, which runs it
+automatically). Already-patched headers without `LGFXSB_SWAP_ASSETS` get asset bytes
+fixed on the next patch run.
+
+Semi-transparent PNGs are flattened on import; use an opaque background if edges look wrong.
 

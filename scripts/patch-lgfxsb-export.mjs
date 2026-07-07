@@ -8,12 +8,13 @@
  *
  * Usage:
  *   node scripts/patch-lgfxsb-export.mjs include/RotaryUi.h
+ *   node scripts/patch-lgfxsb-export.mjs include/RotaryUi.h --no-swap-assets
  */
 
 import fs from 'node:fs';
-import path from 'node:path';
 
 const file = process.argv[2];
+const swapAssets = !process.argv.includes('--no-swap-assets');
 if (!file) {
   console.error('Usage: node scripts/patch-lgfxsb-export.mjs <exported.h>');
   process.exit(1);
@@ -42,6 +43,27 @@ function extractBalancedFn(text, signature) {
   return null;
 }
 
+function swap565Literal(hex) {
+  const v = parseInt(hex, 16);
+  const swapped = ((v & 0xff) << 8) | (v >> 8);
+  return swapped.toString(16).padStart(4, '0');
+}
+
+function swapAssetArrays(text) {
+  return text.replace(/static const uint16_t (kAsset_\w+)\[\] = \{([^}]+)\};/g, (match, name, body) => {
+    const swappedBody = body.replace(/0x([0-9a-fA-F]{4})/g, (_, hex) => `0x${swap565Literal(hex)}`);
+    return `static const uint16_t ${name}[] = {${swappedBody}};`;
+  });
+}
+
+function markAssetSwap(text) {
+  if (text.includes('LGFXSB_SWAP_ASSETS')) return text;
+  return text.replace(
+    '// LGFXSB_ESP32_PATCHED',
+    '// LGFXSB_ESP32_PATCHED\n// LGFXSB_SWAP_ASSETS — RGB565 byte order for LovyanGFX pushImage on ESP32',
+  );
+}
+
 function repairAssetOrder(text) {
   const assetData = text.search(/static const uint16_t kAsset_\w+\[\]/);
   const assetsFn = text.search(/inline const lgfxsb::AssetDesc\* assets\(\)/);
@@ -67,7 +89,13 @@ function repairAssetOrder(text) {
 }
 
 if (src.includes('LGFXSB_ESP32_PATCHED')) {
-  const repaired = repairAssetOrder(src);
+  let repaired = repairAssetOrder(src);
+  if (swapAssets && src.includes('kAsset_') && !src.includes('LGFXSB_SWAP_ASSETS')) {
+    repaired = markAssetSwap(swapAssetArrays(repaired));
+    fs.writeFileSync(file, repaired);
+    console.log(`${file}: byte-swapped image assets for LovyanGFX`);
+    process.exit(0);
+  }
   if (repaired !== src) {
     fs.writeFileSync(file, repaired);
     console.log(`${file}: repaired asset function order`);
@@ -349,5 +377,9 @@ if (!out.includes('LGFXSB_ESP32_PATCHED')) {
   );
 }
 
+if (swapAssets && out.includes('kAsset_')) {
+  out = markAssetSwap(swapAssetArrays(out));
+}
+
 fs.writeFileSync(file, out);
-console.log(`Patched ${file} (${parts.length} parts, ${profiles.length} profiles, ${layouts.length} layouts)`);
+console.log(`Patched ${file} (${parts.length} parts, ${profiles.length} profiles, ${layouts.length} layouts${swapAssets && out.includes('kAsset_') ? ', assets byte-swapped' : ''})`);
