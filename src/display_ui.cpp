@@ -142,7 +142,7 @@ void DisplayUi::drawIntervalPage(const UiState& state) {
   canvas_.fillRoundRect(24, 72, 192, 96, 12, panelColor);
   canvas_.setTextDatum(textdatum_t::middle_center);
   canvas_.setTextColor(TFT_WHITE, panelColor);
-  canvas_.setFont(&fonts::Font7);
+  canvas_.setFont(&fonts::Font4);
   canvas_.drawString(intervalLabel(state.displayedInterval), kCx, 118);
   canvas_.setFont(&fonts::Font0);
   if (state.editingInterval) {
