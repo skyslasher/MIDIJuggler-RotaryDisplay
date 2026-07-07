@@ -2,7 +2,14 @@
 
 #include <LovyanGFX.hpp>
 #if __has_include(<LGFXVirtualCanvas.h>)
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #include <LGFXVirtualCanvas.h>
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 #endif
 #include <LGFXScreenBuilder.h>
 
