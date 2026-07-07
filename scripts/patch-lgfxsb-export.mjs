@@ -316,8 +316,17 @@ function injectShowHome(text, parts, scenes) {
   return out;
 }
 
+function repairUndefinedSceneIds(text) {
+  if (!text.includes('scene(undefined')) return text;
+  let i = 0;
+  return text.replace(
+    /scene\(undefined,\s*"([^"]+)",\s*(\d+),\s*(\d+)\)/g,
+    (_, name, start, count) => `scene(${i++}, "${name}", ${start}, ${count})`,
+  );
+}
+
 function finalizeHeader(text, parts, scenes) {
-  return injectShowHome(text, parts, scenes);
+  return injectShowHome(repairUndefinedSceneIds(text), parts, scenes);
 }
 
 const partsBlock = extractBlock(src, 'static const lgfxsb::PartDesc kParts[] = {', '};');
@@ -334,6 +343,7 @@ if (!partsBlock || !scenesBlock || !layoutsBlock || !profilesBlock || !projectBl
 
 const parts = parseParts(partsBlock);
 const scenes = parseScenes(scenesBlock).map((s) => ({
+  id: Number(s.id),
   name: s.name,
   start: Number(s.start),
   count: Number(s.count),
