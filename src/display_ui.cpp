@@ -17,6 +17,11 @@
 #include "backlight.h"
 #include "board.h"
 
+#if defined(ROTARY_UI_REQUIRE_DYNAMIC) && defined(ROTARY_UI_HAS_SCENE_Home) && \
+    (!defined(ROTARY_UI_HOME_DYNAMIC) || !defined(ROTARY_UI_HOME_PART_COUNT))
+#error "Patched include/RotaryUi.h required (ROTARY_UI_HOME_DYNAMIC + ROTARY_UI_HOME_PART_COUNT)."
+#endif
+
 namespace {
 
 constexpr uint32_t kBootDurationMs = 2000;
@@ -220,6 +225,7 @@ void fillHomeValues(lgfxsb::Value* v, const UiState& state, const char* bpmText,
 void DisplayUi::renderHome(const UiState& state) {
   snprintf(builderBpm_, sizeof(builderBpm_), "%.0f", state.displayedBpm);
   strlcpy(builderInterval_, intervalLabel(state.clickInterval), sizeof(builderInterval_));
+  lcd_.waitDMA();
   if (lcd_.getStartCount() > 0) {
     lcd_.endWrite();
   }
@@ -234,6 +240,8 @@ void DisplayUi::renderHome(const UiState& state) {
   home.bpmText = builderBpm_;
   screen_->show(home);
 #endif
+  // Drop stale manual-page sprite pixels so a later pushFull() cannot resurrect "< swipe >".
+  canvas_.fillScreen(kBg);
 }
 #endif
 
@@ -267,6 +275,7 @@ void DisplayUi::renderPage(const UiState& state, bool& usedBuilder) {
 }
 
 void DisplayUi::pushFull() {
+  lcd_.waitDMA();
   if (lcd_.getStartCount() > 0) {
     lcd_.endWrite();
   }

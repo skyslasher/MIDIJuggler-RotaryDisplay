@@ -47,6 +47,8 @@ if [[ -f include/RotaryUi.h ]] && command -v node >/dev/null 2>&1; then
 fi
 
 echo "Uploading firmware (env pi-serial)..."
+# display_ui.cpp #ifdefs depend on RotaryUi.h; force recompile after header export/patch.
+rm -f .pio/build/pi-serial/src/display_ui.cpp.o
 pio run -e pi-serial -t upload
 
 echo "Starting midijuggler..."
