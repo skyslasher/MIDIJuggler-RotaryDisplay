@@ -1,7 +1,11 @@
 #include "display_ui.h"
 
 #include <LovyanGFX.hpp>
+// LGFXVirtualCanvas uses deprecated LovyanGFX text APIs; warnings are upstream.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <LGFXVirtualCanvas.h>
+#pragma GCC diagnostic pop
 #include <LGFXScreenBuilder.h>
 
 #include "RotaryUi.h"
