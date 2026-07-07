@@ -184,7 +184,7 @@ void loop() {
   gTransport.loop();
   updateNetworkStatus();
 
-  if (gRenderDirty) {
+  if (gRenderDirty || gDisplay.shouldRender(gUi)) {
     gDisplay.render(gUi);
     gRenderDirty = false;
   }

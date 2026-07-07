@@ -270,6 +270,13 @@ bool DisplayUi::stateChanged(const UiState& state) const {
          strcmp(lastMessage_, message_) != 0;
 }
 
+bool DisplayUi::shouldRender(const UiState& state) const {
+  if (showingBoot_) {
+    return millis() - bootStartedMs_ >= kBootDurationMs;
+  }
+  return stateChanged(state);
+}
+
 void DisplayUi::render(const UiState& state) {
   if (showingBoot_) {
     if (millis() - bootStartedMs_ < kBootDurationMs) {

@@ -36,6 +36,7 @@ class DisplayUi {
  public:
   void begin();
   void render(const UiState& state);
+  bool shouldRender(const UiState& state) const;
   void setMessage(const char* message);
 
  private:

@@ -143,3 +143,19 @@ on ESP32 GCC 8.4. The patch script rewrites them with factory helpers.
 If the export contains a `Main` scene, the BPM page is rendered through LGFXScreenBuilder;
 other pages remain manual draw in `src/display_ui.cpp`.
 
+#### Boot images (logo)
+
+LGFXScreenBuilder does **not** use a separate palette. Image assets are converted to
+**RGB565** and embedded as `kAsset_*` arrays in the exported `.h`.
+
+For a correct logo on the device:
+
+1. In the tool, open **Assets** and import a **true-colour PNG** (24-bit RGB or 32-bit RGBA).
+   Avoid indexed-colour / GIF palette images — convert them to PNG first.
+2. Match the asset size to the on-screen `Image` part (e.g. 240×240 full-screen boot logo).
+3. Check the preview in the **Design** tab; it approximates the device colours.
+4. Re-export, run `patch-lgfxsb-export.mjs`, and flash.
+
+If red and blue are swapped, re-import the PNG (some editors export BGR-ordered data).
+Semi-transparent PNGs are flattened on import; use an opaque background colour if edges look wrong.
+
