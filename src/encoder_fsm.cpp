@@ -173,7 +173,7 @@ EncoderFsm::Result EncoderFsm::update(int settingsPage) {
           editingInterval_ = false;
           rotatedWhileEditingInterval_ = false;
           result.confirmInterval = true;
-          strlcpy(result->newInterval, confirmedInterval_, sizeof(result->newInterval));
+          strlcpy(result.newInterval, confirmedInterval_, sizeof(result.newInterval));
         }
         break;
       default:
