@@ -239,6 +239,70 @@ function repairSceneCounts(text, parts, scenes) {
   return out;
 }
 
+function replaceMemberFn(text, signature, replacement) {
+  const block = extractBalancedFn(text, signature);
+  if (!block) return null;
+  const lineStart = text.lastIndexOf('\n', block.start) + 1;
+  const indent = text.slice(lineStart, block.start).match(/^\s*/)?.[0] ?? '  ';
+  const body = replacement
+    .split('\n')
+    .map((line) => (line.length ? indent + line.trimStart() : line))
+    .join('\n');
+  const next = body.endsWith('\n') ? body : `${body}\n`;
+  return text.slice(0, lineStart) + next + text.slice(block.end);
+}
+
+function generateShowBootMethod(boot, parts) {
+  const bootParts = parts.slice(boot.start, boot.start + boot.count);
+  const lines = [];
+  for (let i = 0; i < bootParts.length; i++) {
+    const p = bootParts[i];
+    if (p.id === 'title') {
+      lines.push(`if (s.title) v[${i}] = lgfxsb::Value::text(s.title);`);
+    } else if (p.id === 'subtitle') {
+      lines.push(`if (s.subtitle) v[${i}] = lgfxsb::Value::text(s.subtitle);`);
+    } else if (p.type === 'Image' || p.id === 'logo') {
+      lines.push(`v[${i}] = lgfxsb::Value::boolean(true);`);
+    }
+  }
+  const body = lines.map((line) => `    ${line}`).join('\n');
+  return `void show(const Scene::Boot& s) {
+    lgfxsb::Value v[${boot.count}]{};
+${body}
+    renderScene(Scene::Boot::id, v, ${boot.count}, nullptr, nullptr, nullptr);
+  }`;
+}
+
+function repairScreenClass(text, parts, scenes) {
+  const fixedScenes = computeSceneCounts(parts, scenes);
+  const boot = fixedScenes.find((s) => s.name === 'Boot');
+  const missing = [];
+
+  if (!text.includes('explicit Screen(lgfx::LGFX_Device& gfx)')) {
+    missing.push('explicit Screen(lgfx::LGFX_Device& gfx) : Base(gfx, detail::project()) {}');
+  }
+  if (!text.includes('void setProfile(Profile p)')) {
+    missing.push('void setProfile(Profile p) { _profile = static_cast<uint8_t>(p); }');
+  }
+  if (boot && !text.includes('void show(const Scene::Boot&')) {
+    missing.push(generateShowBootMethod(boot, parts));
+  }
+
+  if (missing.length === 0) return text;
+
+  const insert = missing.map((line) => `  ${line}`).join('\n');
+  if (text.includes('\n public:\n')) {
+    return text.replace('\n public:\n', `\n public:\n${insert}\n`);
+  }
+  if (text.includes('using Base = lgfxsb::RendererT<Canvas>;')) {
+    return text.replace(
+      'using Base = lgfxsb::RendererT<Canvas>;\n',
+      `using Base = lgfxsb::RendererT<Canvas>;\n\n public:\n${insert}\n`,
+    );
+  }
+  return text;
+}
+
 function generateHomeIndexDefines(home, parts) {
   const homeParts = parts.slice(home.start, home.start + home.count);
   if (!homeParts.some((p) => p.id === 'klickBgInactive')) return '';
@@ -371,16 +435,20 @@ function repairLayoutVisibility(text) {
 }
 
 function stripHomeOverlay(text) {
-  let out = text
-    .replace(
-      /renderScene\(Scene::Home::id,([^;]*), _ov_Home \? &_ovt_Home : nullptr, &s, &_ov_Home\)/g,
-      'renderScene(Scene::Home::id,$1, nullptr, nullptr, nullptr)',
-    )
-    .replace(
-      /void show\(const Scene::Home& s\) \{[\s\S]*?renderScene\(Scene::Home::id,[\s\S]*?\n  \}\n/,
-      `void show(const Scene::Home& s) {\n    (void)s;\n    /* Home rendering is driven by DisplayUi::renderHome() + renderHomeScene() */\n  }\n`,
-    );
-  out = out.replace(/\n  void setOverlay[^\n]+\n/g, '\n');
+  const homeShowStub = `void show(const Scene::Home& s) {
+    (void)s;
+    /* Home rendering is driven by DisplayUi::renderHome() + renderHomeScene() */
+  }`;
+
+  let out = text.replace(
+    /renderScene\(Scene::Home::id,([^;]*), _ov_Home \? &_ovt_Home : nullptr, &s, &_ov_Home\)/g,
+    'renderScene(Scene::Home::id,$1, nullptr, nullptr, nullptr)',
+  );
+
+  const replaced = replaceMemberFn(out, 'void show(const Scene::Home& s) {', homeShowStub);
+  if (replaced) out = replaced;
+
+  out = out.replace(/void setOverlay\(void \(\*fn\)\(Canvas&, const Scene::Home&\)\) \{ _ov_Home = fn; \}\n?/g, '');
   out = out.replace(/\n  static void _ovt_Home\(Canvas& g, const void\* s, const void\* fnp\) \{[\s\S]*?\n  \}\n/g, '\n');
   out = out.replace(/\n  void \(\*_ov_Home\)\(Canvas&, const Scene::Home&\) = nullptr;\n/g, '\n');
   return out;
@@ -391,6 +459,7 @@ function finalizeHeader(text, parts, scenes) {
   out = repairLayoutVisibility(out);
   out = stripHomeOverlay(out);
   out = injectShowHome(out, parts, scenes);
+  out = repairScreenClass(out, parts, scenes);
   return out;
 }
 

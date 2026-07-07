@@ -60,6 +60,24 @@ if (!text.includes('renderHomeScene')) {
   pass('renderHomeScene() vorhanden');
 }
 
+if (!text.includes('explicit Screen(lgfx::LGFX_Device& gfx)')) {
+  fail('Screen-Konstruktor fehlt — patch erneut ausführen');
+} else {
+  pass('Screen-Konstruktor vorhanden');
+}
+
+if (text.includes('ROTARY_UI_HAS_SCENE_Boot') && !text.includes('void show(const Scene::Boot&')) {
+  fail('show(Boot) fehlt — patch erneut ausführen');
+} else if (text.includes('ROTARY_UI_HAS_SCENE_Boot')) {
+  pass('show(Boot) vorhanden');
+}
+
+if (!text.includes('void setProfile(Profile p)')) {
+  fail('setProfile() fehlt — patch erneut ausführen');
+} else {
+  pass('setProfile() vorhanden');
+}
+
 const projectPartCount = text.match(/p\.partCount = (\d+);/);
 const partEntries = (text.match(/part\("/g) || []).length;
 if (projectPartCount && Number(projectPartCount[1]) !== partEntries) {
