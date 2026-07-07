@@ -1,5 +1,9 @@
 #pragma once
 
+#define ROTARY_UI_PART_COUNT 3
+#define ROTARY_UI_PROFILE_COUNT 3
+#define ROTARY_UI_HAS_SCENE_Boot 1
+
 // LGFXScreenBuilder export for MIDIJuggler-RotaryDisplay boot splash.
 // Profile index 2 = 240x240 (Elecrow CrowPanel). Re-export from
 // https://tanakamasayuki.github.io/LGFXScreenBuilder/ when layouts change.

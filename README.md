@@ -124,10 +124,22 @@ The five main pages (BPM, Klick, Puls, Intervall, Netzwerk) are drawn manually i
 To redesign the boot screen visually:
 
 1. Open the [authoring tool](https://tanakamasayuki.github.io/LGFXScreenBuilder/) (target: **LovyanGFX**)
-2. Add or edit a **240×240** profile and the `Boot` scene (parts: logo, title, subtitle)
+2. Add or edit a **240×240** profile and scenes (`Boot`, optionally `Main` for the BPM page)
 3. Export `.h` and replace `include/RotaryUi.h`
-4. If the export uses brace-initialized descriptor arrays, keep the factory-helper
-   pattern in the current header (LGFXScreenBuilder 0.2.x + ESP32 GCC) or regenerate
-   once the tool emits compatible init code
+4. **Patch for ESP32** (required after each export):
+
+```bash
+node scripts/patch-lgfxsb-export.mjs include/RotaryUi.h
+```
+
+`./scripts/flash-pi.sh` runs this automatically when `node` is available.
+
+Raw LGFXScreenBuilder exports use brace-initialized descriptor arrays that **do not compile**
+on ESP32 GCC 8.4. The patch script rewrites them with factory helpers.
+
 5. Rebuild: `pio run -e elecrow128-serial -t upload`
+
+`Profile::Auto` selects the profile matching the panel size (240×240 on Elecrow).
+If the export contains a `Main` scene, the BPM page is rendered through LGFXScreenBuilder;
+other pages remain manual draw in `src/display_ui.cpp`.
 

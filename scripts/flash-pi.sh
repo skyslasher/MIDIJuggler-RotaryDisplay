@@ -18,6 +18,12 @@ if [[ -e "$PORT" ]] && command -v fuser >/dev/null 2>&1; then
 fi
 
 cd "$ROOT"
+
+if [[ -f include/RotaryUi.h ]] && command -v node >/dev/null 2>&1; then
+  echo "Patching LGFXScreenBuilder export for ESP32 GCC..."
+  node scripts/patch-lgfxsb-export.mjs include/RotaryUi.h
+fi
+
 echo "Uploading firmware (env pi-serial)..."
 pio run -e pi-serial -t upload
 

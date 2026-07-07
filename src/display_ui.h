@@ -40,7 +40,10 @@ class DisplayUi {
 
  private:
   void renderBoot();
-  void renderPage(const UiState& state);
+  void renderPage(const UiState& state, bool& usedBuilder);
+#ifdef ROTARY_UI_HAS_SCENE_Main
+  void renderMainBuilder(const UiState& state);
+#endif
   void pushFull();
   bool stateChanged(const UiState& state) const;
 
@@ -53,5 +56,11 @@ class DisplayUi {
   bool ready_ = false;
   bool showingBoot_ = true;
   uint32_t bootStartedMs_ = 0;
+#ifdef ROTARY_UI_HAS_SCENE_Main
+  char builderBpm_[12] = "";
+  char builderClick_[8] = "";
+  char builderPulse_[8] = "";
+  char builderInterval_[8] = "";
+#endif
   static DisplayUi* instance_;
 };

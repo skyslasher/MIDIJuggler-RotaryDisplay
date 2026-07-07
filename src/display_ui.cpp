@@ -1,7 +1,10 @@
 #include "display_ui.h"
 
-#include <LGFXScreenBuilder.h>
 #include <LovyanGFX.hpp>
+#if __has_include(<LGFXVirtualCanvas.h>)
+#include <LGFXVirtualCanvas.h>
+#endif
+#include <LGFXScreenBuilder.h>
 
 #include "RotaryUi.h"
 #include "backlight.h"
@@ -174,7 +177,7 @@ void DisplayUi::begin() {
 
   screen_ = new RotaryUi::Screen(lcd_);
   screen_->begin();
-  screen_->setProfile(RotaryUi::Profile::Rotary);
+  screen_->setProfile(RotaryUi::Profile::Auto);
 
   canvas_.setColorDepth(16);
   canvas_.setPsram(true);
@@ -197,10 +200,31 @@ void DisplayUi::renderBoot() {
   screen_->show(boot);
 }
 
-void DisplayUi::renderPage(const UiState& state) {
+#ifdef ROTARY_UI_HAS_SCENE_Main
+void DisplayUi::renderMainBuilder(const UiState& state) {
+  RotaryUi::Scene::Main main;
+  snprintf(builderBpm_, sizeof(builderBpm_), "%.0f", state.displayedBpm);
+  strlcpy(builderClick_, state.clickEnabled ? "Ein" : "Aus", sizeof(builderClick_));
+  strlcpy(builderPulse_, state.pulseEnabled ? "Ein" : "Aus", sizeof(builderPulse_));
+  strlcpy(builderInterval_, intervalLabel(state.clickInterval), sizeof(builderInterval_));
+  main.bpmtext = builderBpm_;
+  main.clicktext = builderClick_;
+  main.pulsetext = builderPulse_;
+  main.intervaltext = builderInterval_;
+  screen_->show(main);
+}
+#endif
+
+void DisplayUi::renderPage(const UiState& state, bool& usedBuilder) {
+  usedBuilder = false;
   switch (static_cast<SettingsPage>(state.settingsPage)) {
     case SettingsPage::Bpm:
+#ifdef ROTARY_UI_HAS_SCENE_Main
+      renderMainBuilder(state);
+      usedBuilder = true;
+#else
       drawBpmPage(canvas_, state, message_);
+#endif
       break;
     case SettingsPage::Click:
       drawClickPage(canvas_, state, message_);
@@ -259,8 +283,11 @@ void DisplayUi::render(const UiState& state) {
     return;
   }
 
-  renderPage(state);
-  pushFull();
+  bool usedBuilder = false;
+  renderPage(state, usedBuilder);
+  if (!usedBuilder) {
+    pushFull();
+  }
   lastRendered_ = state;
   strlcpy(lastMessage_, message_, sizeof(lastMessage_));
   ready_ = true;
