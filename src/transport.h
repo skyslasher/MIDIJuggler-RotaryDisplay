@@ -50,6 +50,7 @@ class Transport {
   uint32_t lastHelloMs_ = 0;
   uint32_t lastSyncMs_ = 0;
   bool wifiRxReady_ = false;
+  SyncPayload pendingSync_;
 
   void sendSerialLine(const char* line);
   void maintainWifi();
@@ -65,6 +66,7 @@ class Transport {
   void pollSerial();
   void pollOsc();
   void dispatchLine(const char* line);
+  void emitSync();
   static bool parseSyncLine(const char* line, SyncPayload* payload);
   static bool parseBeatLine(const char* line, float* beat);
 };

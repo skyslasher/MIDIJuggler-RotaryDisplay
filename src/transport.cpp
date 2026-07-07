@@ -15,6 +15,10 @@ constexpr const char* kTapTempoAddress = "/midijuggler/clock/tap_tempo";
 constexpr const char* kHelloAddress = "/midijuggler/rotary/hello";
 constexpr const char* kSyncAddress = "/midijuggler/rotary/sync";
 constexpr const char* kBeatAddress = "/midijuggler/rotary/beat";
+constexpr const char* kFeedbackBpmAddress = "/midijuggler/rotary/bpm";
+constexpr const char* kFeedbackRunningAddress = "/midijuggler/rotary/running";
+constexpr const char* kFeedbackClickEnabledAddress = "/midijuggler/rotary/click_enabled";
+constexpr const char* kFeedbackClickIntervalAddress = "/midijuggler/rotary/click_interval";
 
 WiFiUDP gTx;
 WiFiUDP gRx;
@@ -409,6 +413,14 @@ void Transport::sendOscHello() {
   sendOscHelloPacket(host_, oscPort_, WiFi.localIP().toString().c_str(), listenPort_);
 }
 
+void Transport::emitSync() {
+  if (!onSync_) {
+    return;
+  }
+  lastSyncMs_ = millis();
+  onSync_(pendingSync_);
+}
+
 void Transport::pollSerial() {
   while (Serial.available() > 0) {
     const char c = static_cast<char>(Serial.read());
@@ -449,6 +461,45 @@ void Transport::pollOsc() {
     }
     return;
   }
+  if (strcmp(address, kFeedbackBpmAddress) == 0) {
+    float bpm = pendingSync_.bpm;
+    const size_t offset = pad4(strlen(address) + 1) + pad4(2);
+    if (static_cast<size_t>(read) >= offset + sizeof(bpm)) {
+      memcpy(&bpm, buffer + offset, sizeof(bpm));
+      pendingSync_.bpm = bpm;
+      emitSync();
+    }
+    return;
+  }
+  if (strcmp(address, kFeedbackRunningAddress) == 0) {
+    int32_t running = 0;
+    const size_t offset = pad4(strlen(address) + 1) + pad4(2);
+    if (static_cast<size_t>(read) >= offset + sizeof(running)) {
+      memcpy(&running, buffer + offset, sizeof(running));
+      pendingSync_.running = running != 0;
+      emitSync();
+    }
+    return;
+  }
+  if (strcmp(address, kFeedbackClickEnabledAddress) == 0) {
+    int32_t clickEnabled = 0;
+    const size_t offset = pad4(strlen(address) + 1) + pad4(2);
+    if (static_cast<size_t>(read) >= offset + sizeof(clickEnabled)) {
+      memcpy(&clickEnabled, buffer + offset, sizeof(clickEnabled));
+      pendingSync_.clickEnabled = clickEnabled != 0;
+      emitSync();
+    }
+    return;
+  }
+  if (strcmp(address, kFeedbackClickIntervalAddress) == 0) {
+    const size_t offset = pad4(strlen(address) + 1) + pad4(2);
+    if (offset < static_cast<size_t>(read)) {
+      strlcpy(pendingSync_.clickInterval, reinterpret_cast<const char*>(buffer + offset),
+              sizeof(pendingSync_.clickInterval));
+      emitSync();
+    }
+    return;
+  }
   if (strcmp(address, kSyncAddress) != 0) {
     return;
   }
@@ -471,6 +522,7 @@ void Transport::pollOsc() {
     strlcpy(payload.clickInterval, reinterpret_cast<const char*>(buffer + offset),
             sizeof(payload.clickInterval));
   }
+  pendingSync_ = payload;
   if (onSync_) {
     lastSyncMs_ = millis();
     onSync_(payload);
@@ -511,6 +563,7 @@ void Transport::dispatchLine(const char* line) {
   SyncPayload payload;
   float beat = 0.0f;
   if (parseSyncLine(line, &payload)) {
+    pendingSync_ = payload;
     lastSyncMs_ = millis();
     if (onSync_) {
       onSync_(payload);
