@@ -28,51 +28,12 @@ constexpr uint16_t kAccent = 0x4CDF;
 constexpr uint16_t kOn = 0x47E0;
 constexpr uint16_t kOff = 0xFC18;
 
-constexpr uint16_t makeRgb565(uint8_t r, uint8_t g, uint8_t b) {
-  return static_cast<uint16_t>(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
-}
-
-constexpr uint16_t kChipInactiveBg = makeRgb565(29, 34, 51);
-constexpr uint16_t kChipActiveBg = makeRgb565(62, 79, 117);
-constexpr uint16_t kChipInactiveText = makeRgb565(118, 121, 132);
-constexpr uint16_t kChipActiveText = makeRgb565(201, 204, 215);
-
-constexpr int kHomeChipY = 168;
-constexpr int kHomeChipW = 68;
-constexpr int kHomeChipH = 40;
-constexpr int kHomeChipGap = 6;
-constexpr int kHomeChipX = (board::kWidth - (kHomeChipW * 3 + kHomeChipGap * 2)) / 2;
-
 const char* intervalLabel(const char* interval) {
   if (strcmp(interval, "sixteenth") == 0) return "1/16";
   if (strcmp(interval, "eighth") == 0) return "1/8";
   if (strcmp(interval, "half") == 0) return "1/2";
   if (strcmp(interval, "whole") == 0) return "1/1";
   return "1/4";
-}
-
-template <typename Gfx>
-void drawHomeStatusChip(Gfx& g, int x, int y, int w, int h, const char* text, uint16_t bg, uint16_t fg) {
-  g.fillRoundRect(x, y, w, h, 4, bg);
-  g.setFont(&fonts::Font0);
-  g.setTextDatum(textdatum_t::middle_center);
-  g.setTextColor(fg, bg);
-  g.drawString(text, x + w / 2, y + h / 2);
-}
-
-template <typename Gfx>
-void drawHomeStatusRow(Gfx& g, const UiState& state) {
-  const int x0 = kHomeChipX;
-  const int x1 = x0 + kHomeChipW + kHomeChipGap;
-  const int x2 = x1 + kHomeChipW + kHomeChipGap;
-  const uint16_t clickBg = state.clickEnabled ? kChipActiveBg : kChipInactiveBg;
-  const uint16_t clickFg = state.clickEnabled ? kChipActiveText : kChipInactiveText;
-  const uint16_t pulseBg = state.pulseEnabled ? kChipActiveBg : kChipInactiveBg;
-  const uint16_t pulseFg = state.pulseEnabled ? kChipActiveText : kChipInactiveText;
-  drawHomeStatusChip(g, x0, kHomeChipY, kHomeChipW, kHomeChipH, "Klick", clickBg, clickFg);
-  drawHomeStatusChip(g, x1, kHomeChipY, kHomeChipW, kHomeChipH, "Puls", pulseBg, pulseFg);
-  drawHomeStatusChip(g, x2, kHomeChipY, kHomeChipW, kHomeChipH, intervalLabel(state.clickInterval),
-                     kChipInactiveBg, kChipInactiveText);
 }
 
 template <typename Gfx>
@@ -87,25 +48,21 @@ void drawFooter(Gfx& g, const char* message, uint16_t bg = kBg) {
 }
 
 void drawBpmPage(lgfx::LovyanGFX& lcd, const UiState& state, const char* message) {
-  constexpr uint16_t kHomeBg = makeRgb565(16, 16, 24);
-  lcd.fillScreen(kHomeBg);
-  lcd.fillRoundRect(10, 44, 220, 108, 8, kChipInactiveBg);
+  lcd.fillScreen(kBg);
+  lcd.fillRoundRect(10, 44, 220, 108, 8, kPanel);
   if (state.editing) {
     lcd.drawRoundRect(10, 44, 220, 108, 8, kAccent);
   }
 
   lcd.setTextDatum(textdatum_t::middle_center);
   lcd.setFont(&fonts::Font4);
-  lcd.setTextColor(kChipActiveText, kChipInactiveBg);
+  lcd.setTextColor(TFT_WHITE, kPanel);
   char bpmText[8];
   snprintf(bpmText, sizeof(bpmText), "%.0f", state.displayedBpm);
   lcd.drawString(bpmText, kCx, 96);
   lcd.setFont(&fonts::Font0);
-  lcd.setTextColor(kChipInactiveText, kChipInactiveBg);
   lcd.drawString("BPM", kCx, 132);
-
-  drawHomeStatusRow(lcd, state);
-  drawFooter(lcd, message, kHomeBg);
+  drawFooter(lcd, message);
 }
 
 void drawClickPage(lgfx::LovyanGFX& lcd, const UiState& state, const char* message) {
@@ -186,24 +143,7 @@ void drawNetworkPage(lgfx::LovyanGFX& lcd, const UiState& state, const char* mes
 
 }  // namespace
 
-void homeOverlay(RotaryUi::Canvas& g, const RotaryUi::Scene::Home&) {
-  DisplayUi* ui = DisplayUi::instance();
-  if (!ui) {
-    return;
-  }
-  const UiState& state = ui->overlayState();
-  drawHomeStatusRow(g, state);
-  if (state.editing) {
-    g.drawRoundRect(10, 44, 220, 108, 8, kAccent);
-  }
-  constexpr uint16_t kHomeBg = makeRgb565(16, 16, 24);
-  drawFooter(g, ui->footerMessage(), kHomeBg);
-}
-
-DisplayUi* DisplayUi::instance_ = nullptr;
-
 void DisplayUi::begin() {
-  instance_ = this;
   lcd_.init();
   lcd_.initDMA();
   lcd_.startWrite();
@@ -212,9 +152,6 @@ void DisplayUi::begin() {
   screen_ = new RotaryUi::Screen(lcd_);
   screen_->begin();
   screen_->setProfile(RotaryUi::Profile::Auto);
-#ifdef ROTARY_UI_HAS_SCENE_Home
-  screen_->setOverlay(&homeOverlay);
-#endif
 
   canvas_.setColorDepth(16);
   canvas_.setPsram(true);
@@ -239,11 +176,15 @@ void DisplayUi::renderBoot() {
 
 #ifdef ROTARY_UI_HAS_SCENE_Home
 void DisplayUi::renderHome(const UiState& state) {
-  overlayState_ = state;
-  RotaryUi::Scene::Home home;
   snprintf(builderBpm_, sizeof(builderBpm_), "%.0f", state.displayedBpm);
+  strlcpy(builderInterval_, intervalLabel(state.clickInterval), sizeof(builderInterval_));
+#ifdef ROTARY_UI_HOME_DYNAMIC
+  screen_->showHome(builderBpm_, builderInterval_, state.editing, state.clickEnabled, state.pulseEnabled);
+#else
+  RotaryUi::Scene::Home home;
   home.bpmText = builderBpm_;
   screen_->show(home);
+#endif
 }
 #endif
 

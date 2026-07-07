@@ -98,13 +98,19 @@ if (isAlreadyPatched(src)) {
   let repaired = repairAssetOrder(src);
   if (swapAssets && src.includes('kAsset_') && !src.includes('LGFXSB_SWAP_ASSETS')) {
     repaired = markAssetSwap(swapAssetArrays(repaired));
-    fs.writeFileSync(file, repaired);
-    console.log(`${file}: byte-swapped image assets for LovyanGFX`);
-    process.exit(0);
   }
+  const parts = parsePatchedParts(repaired);
+  const scenes = parsePatchedScenes(repaired);
+  repaired = finalizeHeader(repaired, parts, scenes);
   if (repaired !== src) {
     fs.writeFileSync(file, repaired);
-    console.log(`${file}: repaired asset function order`);
+    if (swapAssets && src.includes('kAsset_') && !src.includes('LGFXSB_SWAP_ASSETS')) {
+      console.log(`${file}: byte-swapped image assets for LovyanGFX`);
+    } else if (repaired.includes('void showHome(') && !src.includes('void showHome(')) {
+      console.log(`${file}: injected showHome() for visibility-based Home scene`);
+    } else {
+      console.log(`${file}: repaired asset function order`);
+    }
   } else {
     console.log(`${file}: already patched`);
   }
@@ -204,6 +210,116 @@ function parseProject(block) {
   return { background: bg, hasAssets };
 }
 
+function parsePatchedParts(text) {
+  const re = /part\("([^"]+)",\s*lgfxsb::PartType::\w+/g;
+  const out = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    out.push({ id: m[1] });
+  }
+  return out;
+}
+
+function parsePatchedScenes(text) {
+  const re = /scene\(\d+,\s*"([^"]+)",\s*(\d+),\s*(\d+)\)/g;
+  const out = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    out.push({ name: m[1], start: Number(m[2]), count: Number(m[3]) });
+  }
+  return out;
+}
+
+function homePartIndex(homeParts, id) {
+  return homeParts.findIndex((p) => p.id === id);
+}
+
+function generateShowHomeMethod(home, parts) {
+  const homeParts = parts.slice(home.start, home.start + home.count);
+  if (!homeParts.some((p) => p.id === 'klickBgInactive')) {
+    return null;
+  }
+
+  const lines = [];
+  const accentIdx = homePartIndex(homeParts, 'bpmAccent');
+  if (accentIdx >= 0) lines.push(`    v[${accentIdx}] = lgfxsb::Value::boolean(editing);`);
+
+  const bpmIdx = homePartIndex(homeParts, 'bpmText');
+  if (bpmIdx >= 0) lines.push(`    if (bpmText) v[${bpmIdx}] = lgfxsb::Value::text(bpmText);`);
+
+  const klickInactive = [
+    ['klickBgInactive', '!clickEnabled'],
+    ['klickTextInactive', '!clickEnabled'],
+    ['klickBgActive', 'clickEnabled'],
+    ['klickTextActive', 'clickEnabled'],
+  ];
+  for (const [id, expr] of klickInactive) {
+    const i = homePartIndex(homeParts, id);
+    if (i >= 0) lines.push(`    v[${i}] = lgfxsb::Value::boolean(${expr});`);
+  }
+
+  const pulsInactive = [
+    ['pulsBgInactive', '!pulseEnabled'],
+    ['pulsTextInactive', '!pulseEnabled'],
+    ['pulsBgActive', 'pulseEnabled'],
+    ['pulsTextActive', 'pulseEnabled'],
+  ];
+  for (const [id, expr] of pulsInactive) {
+    const i = homePartIndex(homeParts, id);
+    if (i >= 0) lines.push(`    v[${i}] = lgfxsb::Value::boolean(${expr});`);
+  }
+
+  const intervalIdx = homePartIndex(homeParts, 'intervalText');
+  if (intervalIdx >= 0) lines.push(`    if (intervalText) v[${intervalIdx}] = lgfxsb::Value::text(intervalText);`);
+
+  return `
+  void showHome(const char* bpmText, const char* intervalText, bool editing,
+                bool clickEnabled, bool pulseEnabled) {
+    lgfxsb::Value v[${home.count}]{};
+${lines.join('\n')}
+    renderScene(Scene::Home::id, v, ${home.count}, nullptr, nullptr, nullptr);
+  }`;
+}
+
+function injectShowHome(text, parts, scenes) {
+  const home = scenes.find((s) => s.name === 'Home');
+  if (!home) return text;
+
+  const method = generateShowHomeMethod(home, parts);
+  if (!method) return text;
+
+  let out = text.replace(/\n  void showHome\([\s\S]*?\n  \}\n/g, '\n');
+  if (out.includes('void showHome(')) return out;
+
+  if (out.match(/void setOverlay\(void \(\*\)fn\)\(Canvas&, const Scene::Home&\)\)/)) {
+    out = out.replace(
+      /(  void setOverlay\(void \(\*\)fn\)\(Canvas&, const Scene::Home&\)\) \{ _ov_Home = fn; \}\n)/,
+      `$1${method}\n`,
+    );
+  } else {
+    out = out.replace(/(\n};)(\n\n}  \/\/ namespace RotaryUi)/, `\n${method}\n$1$2`);
+  }
+
+  if (!out.includes('ROTARY_UI_HOME_DYNAMIC')) {
+    if (out.includes('#define ROTARY_UI_HAS_SCENE_Home 1')) {
+      out = out.replace(
+        /#define ROTARY_UI_HAS_SCENE_Home 1\n/,
+        `#define ROTARY_UI_HAS_SCENE_Home 1\n#define ROTARY_UI_HOME_DYNAMIC 1\n#define ROTARY_UI_HOME_PART_COUNT ${home.count}\n`,
+      );
+    } else {
+      out = out.replace(
+        '#pragma once\n',
+        `#pragma once\n\n#define ROTARY_UI_HOME_DYNAMIC 1\n#define ROTARY_UI_HOME_PART_COUNT ${home.count}\n`,
+      );
+    }
+  }
+  return out;
+}
+
+function finalizeHeader(text, parts, scenes) {
+  return injectShowHome(text, parts, scenes);
+}
+
 const partsBlock = extractBlock(src, 'static const lgfxsb::PartDesc kParts[] = {', '};');
 const scenesBlock = extractBlock(src, 'static const lgfxsb::SceneDesc kScenes[] = {', '};');
 const layoutsBlock = extractBlock(src, 'static const lgfxsb::PartLayout kLayouts[] = {', '};');
@@ -217,7 +333,11 @@ if (!partsBlock || !scenesBlock || !layoutsBlock || !profilesBlock || !projectBl
 }
 
 const parts = parseParts(partsBlock);
-const scenes = parseScenes(scenesBlock);
+const scenes = parseScenes(scenesBlock).map((s) => ({
+  name: s.name,
+  start: Number(s.start),
+  count: Number(s.count),
+}));
 const layouts = parseLayouts(layoutsBlock);
 const profiles = parseProfiles(profilesBlock);
 const assets = assetsBlock ? parseAssets(assetsBlock) : [];
@@ -387,5 +507,7 @@ if (swapAssets && out.includes('kAsset_')) {
   out = markAssetSwap(swapAssetArrays(out));
 }
 
+out = finalizeHeader(out, parts, scenes);
+
 fs.writeFileSync(file, out);
-console.log(`Patched ${file} (${parts.length} parts, ${profiles.length} profiles, ${layouts.length} layouts${swapAssets && out.includes('kAsset_') ? ', assets byte-swapped' : ''})`);
+console.log(`Patched ${file} (${parts.length} parts, ${profiles.length} profiles, ${layouts.length} layouts${out.includes('void showHome(') ? ', showHome()' : ''}${swapAssets && out.includes('kAsset_') ? ', assets byte-swapped' : ''})`);
