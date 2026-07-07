@@ -182,8 +182,14 @@ void fillHomeValues(lgfxsb::Value* v, const UiState& state, const char* bpmText,
 #ifdef ROTARY_UI_HOME_IDX_bpmAccent
   v[ROTARY_UI_HOME_IDX_bpmAccent] = lgfxsb::Value::boolean(state.editing);
 #endif
+#ifdef ROTARY_UI_HOME_IDX_bpmPanel
+  v[ROTARY_UI_HOME_IDX_bpmPanel] = lgfxsb::Value::boolean(true);
+#endif
 #ifdef ROTARY_UI_HOME_IDX_bpmText
   v[ROTARY_UI_HOME_IDX_bpmText] = lgfxsb::Value::text(bpmText);
+#endif
+#ifdef ROTARY_UI_HOME_IDX_bpmLabel
+  v[ROTARY_UI_HOME_IDX_bpmLabel] = lgfxsb::Value::boolean(true);
 #endif
 #ifdef ROTARY_UI_HOME_IDX_klickBgInactive
   v[ROTARY_UI_HOME_IDX_klickBgInactive] = lgfxsb::Value::boolean(!state.clickEnabled);
@@ -224,6 +230,11 @@ void DisplayUi::renderHome(const UiState& state) {
   snprintf(builderBpm_, sizeof(builderBpm_), "%.0f", state.displayedBpm);
   strlcpy(builderInterval_, intervalLabel(state.clickInterval), sizeof(builderInterval_));
 #if defined(ROTARY_UI_HOME_DYNAMIC) && defined(ROTARY_UI_HOME_PART_COUNT)
+  if (lcd_.getStartCount() > 0) {
+    lcd_.endWrite();
+  }
+  lcd_.fillScreen(0x1083);
+  lcd_.startWrite();
   lgfxsb::Value values[ROTARY_UI_HOME_PART_COUNT]{};
   fillHomeValues(values, state, builderBpm_, builderInterval_);
   screen_->renderHomeScene(values, ROTARY_UI_HOME_PART_COUNT);

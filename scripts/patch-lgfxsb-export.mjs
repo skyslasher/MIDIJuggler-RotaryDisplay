@@ -382,11 +382,42 @@ function repairUndefinedSceneIds(text) {
   );
 }
 
-function finalizeHeader(text, parts, scenes) {
-  return injectShowHome(repairUndefinedSceneIds(text), parts, scenes);
+const HOME_ALWAYS_VISIBLE_PARTS = new Set([
+  'bpmPanel', 'bpmText', 'bpmLabel', 'intervalBg', 'intervalText', 'swipeHint',
+]);
+
+function repairLayoutVisibility(text) {
+  let out = text;
+  for (const id of HOME_ALWAYS_VISIBLE_PARTS) {
+    out = out.replace(
+      new RegExp(`(layout\\([^\\n]*), (true|false), false(, [^\\n]*${id}[^\\n]*)`, 'g'),
+      '$1, $2, true$3',
+    );
+  }
+  return out;
 }
 
-const partsBlock = extractBlock(src, 'static const lgfxsb::PartDesc kParts[] = {', '};');
+function stripHomeOverlay(text) {
+  return text
+    .replace(
+      /renderScene\(Scene::Home::id,([^;]*), _ov_Home \? &_ovt_Home : nullptr, &s, &_ov_Home\)/g,
+      'renderScene(Scene::Home::id,$1, nullptr, nullptr, nullptr)',
+    )
+    .replace(/\n  void setOverlay\(void \(\*\)fn\)\(Canvas&, const Scene::Home&\)\) \{ _ov_Home = fn; \}\n/g, '\n');
+}
+
+function finalizeHeader(text, parts, scenes) {
+  let out = injectShowHome(repairUndefinedSceneIds(text), parts, scenes);
+  out = repairLayoutVisibility(out);
+  out = stripHomeOverlay(out);
+  return out;
+}
+
+function partIdFromComment(comment) {
+  const m = String(comment).match(/\.(\w+)\s*$/);
+  return m ? m[1] : '';
+}
+
 const scenesBlock = extractBlock(src, 'static const lgfxsb::SceneDesc kScenes[] = {', '};');
 const layoutsBlock = extractBlock(src, 'static const lgfxsb::PartLayout kLayouts[] = {', '};');
 const profilesBlock = extractBlock(src, 'static const lgfxsb::ProfileDesc kProfiles[] = {', '};');
@@ -486,7 +517,9 @@ inline const lgfxsb::PartLayout* layouts() {
 ${layouts.map((l) => {
   const font = l.font === 'nullptr' ? 'nullptr' : l.font;
   const text = l.text === 'nullptr' ? 'nullptr' : l.text;
-  return `      layout(${l.x}, ${l.y}, ${l.w}, ${l.h}, ${l.x2}, ${l.y2}, ${l.r}, ${l.datum}, ${l.size}, ${l.color}, ${l.fill}, ${l.visible}, ${font}, ${text}),  // ${l.comment}`;
+  const partId = partIdFromComment(l.comment);
+  const visible = HOME_ALWAYS_VISIBLE_PARTS.has(partId) ? 'true' : l.visible;
+  return `      layout(${l.x}, ${l.y}, ${l.w}, ${l.h}, ${l.x2}, ${l.y2}, ${l.r}, ${l.datum}, ${l.size}, ${l.color}, ${l.fill}, ${visible}, ${font}, ${text}),  // ${l.comment}`;
 }).join('\n')}
   };
   return data;
