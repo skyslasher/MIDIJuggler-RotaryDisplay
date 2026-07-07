@@ -36,6 +36,21 @@ pio run -e pi-serial -t upload
 sudo systemctl start midijuggler
 ```
 
+Or use the helper script (same steps, frees the serial port automatically):
+
+```bash
+./scripts/flash-pi.sh
+```
+
+If upload fails with **"The chip stopped responding"**, ensure MIDIJuggler is stopped,
+unplug/replug USB once, then retry. The `pi-serial` env uses a slower upload speed and
+`esp-builtin` over USB-JTAG for reliability. As a fallback:
+
+```bash
+sudo systemctl stop midijuggler
+pio run -e pi-serial -t upload --upload-speed 115200
+```
+
 The `pi-serial` environment sets `upload_port` / `monitor_port` in
 `platformio.ini` at the repo root. Adjust the by-id path there if your
 device ID differs (`ls /dev/serial/by-id/`).
