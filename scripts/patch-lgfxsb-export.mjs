@@ -20,8 +20,60 @@ if (!file) {
 }
 
 const src = fs.readFileSync(file, 'utf8');
+
+function extractBalancedFn(text, signature) {
+  const start = text.indexOf(signature);
+  if (start < 0) return null;
+  const braceStart = text.indexOf('{', start);
+  if (braceStart < 0) return null;
+  let depth = 0;
+  for (let i = braceStart; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        let end = i + 1;
+        if (text[end] === '\n') end++;
+        return { start, end, body: text.slice(start, end) };
+      }
+    }
+  }
+  return null;
+}
+
+function repairAssetOrder(text) {
+  const assetData = text.search(/static const uint16_t kAsset_\w+\[\]/);
+  const assetsFn = text.search(/inline const lgfxsb::AssetDesc\* assets\(\)/);
+  if (assetData < 0 || assetsFn < 0 || assetsFn < assetData) {
+    return text;
+  }
+
+  const assets = extractBalancedFn(text, 'inline const lgfxsb::AssetDesc* assets()');
+  const project = extractBalancedFn(text, 'inline const lgfxsb::Project& project()');
+  if (!assets || !project) return text;
+
+  let repaired = text;
+  const removeRanges = [assets, project].sort((a, b) => b.start - a.start);
+  for (const block of removeRanges) {
+    repaired = repaired.slice(0, block.start) + repaired.slice(block.end);
+  }
+
+  const tail = `\n${assets.body}\n${project.body}\n`;
+  const marker = '} // namespace detail';
+  const closeIdx = repaired.lastIndexOf(marker);
+  if (closeIdx < 0) return text;
+  return repaired.slice(0, closeIdx) + tail + marker + repaired.slice(closeIdx + marker.length);
+}
+
 if (src.includes('LGFXSB_ESP32_PATCHED')) {
-  console.log(`${file}: already patched`);
+  const repaired = repairAssetOrder(src);
+  if (repaired !== src) {
+    fs.writeFileSync(file, repaired);
+    console.log(`${file}: repaired asset function order`);
+  } else {
+    console.log(`${file}: already patched`);
+  }
   process.exit(0);
 }
 
@@ -257,6 +309,8 @@ inline const lgfxsb::Project& project() {
 }
 `;
 
+const tailInsert = `${assetsFn}${projectFn}\n`;
+
 let out = src;
 out = out.replace(
   /static const lgfxsb::PartDesc kParts\[\] = \{[\s\S]*?\};\nstatic constexpr uint16_t kPartCount = \d+;\n\n/,
@@ -268,8 +322,19 @@ out = out.replace(/static const lgfxsb::ProfileDesc kProfiles\[\] = \{[\s\S]*?\}
 out = out.replace(/static const lgfxsb::AssetDesc kAssets\[\] = \{[\s\S]*?\};\n/, '');
 out = out.replace(/static const lgfxsb::Project project = \{[\s\S]*?\};\n\n/, '');
 
-const detailInsert = `${helpers}${assetsFn}${projectFn}\n`;
-out = out.replace('namespace detail {\n\n', `namespace detail {\n${detailInsert}`);
+const detailInsert = `${helpers}\n`;
+if (out.includes('namespace detail {\n\n')) {
+  out = out.replace('namespace detail {\n\n', `namespace detail {\n${detailInsert}\n`);
+} else {
+  out = out.replace('namespace detail {\n', `namespace detail {\n${detailInsert}`, 1);
+}
+if (!out.includes('inline const lgfxsb::Project& project()')) {
+  const marker = '} // namespace detail';
+  const closeIdx = out.lastIndexOf(marker);
+  if (closeIdx >= 0) {
+    out = out.slice(0, closeIdx) + tailInsert + marker + out.slice(closeIdx + marker.length);
+  }
+}
 
 out = out.replace(
   /explicit Screen\(lgfx::LGFX_Device& gfx\) : Base\(gfx, project\) \{\}/,
