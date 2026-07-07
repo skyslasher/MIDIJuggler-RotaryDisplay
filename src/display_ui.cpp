@@ -27,7 +27,7 @@ const char* intervalLabel(const char* interval) {
   return "1/4";
 }
 
-void drawStatusChip(lgfx::LGFX_Device& lcd, int x, int y, int w, const char* label, const char* value,
+void drawStatusChip(lgfx::LovyanGFX& lcd, int x, int y, int w, const char* label, const char* value,
                     uint16_t valueColor) {
   lcd.fillRoundRect(x, y, w, 36, 8, kPanel);
   lcd.setFont(&fonts::Font0);
@@ -45,7 +45,7 @@ void bootOverlay(RotaryUi::Canvas& g, const RotaryUi::Scene::Boot&) {
   g.drawString("Rotary Display", kCx, 142);
 }
 
-void drawFooter(lgfx::LGFX_Device& lcd, const char* message) {
+void drawFooter(lgfx::LovyanGFX& lcd, const char* message) {
   lcd.setFont(&fonts::Font0);
   lcd.setTextDatum(textdatum_t::bottom_center);
   lcd.setTextColor(TFT_WHITE, kBg);
@@ -55,7 +55,7 @@ void drawFooter(lgfx::LGFX_Device& lcd, const char* message) {
   }
 }
 
-void drawBpmPage(lgfx::LGFX_Device& lcd, const UiState& state, const char* message) {
+void drawBpmPage(lgfx::LovyanGFX& lcd, const UiState& state, const char* message) {
   lcd.fillScreen(kBg);
   lcd.fillRect(0, 0, board::kWidth, 22, kBg);
   lcd.setFont(&fonts::Font2);
@@ -92,7 +92,7 @@ void drawBpmPage(lgfx::LGFX_Device& lcd, const UiState& state, const char* messa
   drawFooter(lcd, message);
 }
 
-void drawClickPage(lgfx::LGFX_Device& lcd, const UiState& state, const char* message) {
+void drawClickPage(lgfx::LovyanGFX& lcd, const UiState& state, const char* message) {
   lcd.fillScreen(kBg);
   lcd.setFont(&fonts::Font2);
   lcd.setTextDatum(textdatum_t::top_center);
@@ -109,7 +109,7 @@ void drawClickPage(lgfx::LGFX_Device& lcd, const UiState& state, const char* mes
   drawFooter(lcd, message);
 }
 
-void drawPulsePage(lgfx::LGFX_Device& lcd, const UiState& state, const char* message) {
+void drawPulsePage(lgfx::LovyanGFX& lcd, const UiState& state, const char* message) {
   lcd.fillScreen(kBg);
   lcd.setFont(&fonts::Font2);
   lcd.setTextDatum(textdatum_t::top_center);
@@ -126,7 +126,7 @@ void drawPulsePage(lgfx::LGFX_Device& lcd, const UiState& state, const char* mes
   drawFooter(lcd, message);
 }
 
-void drawIntervalPage(lgfx::LGFX_Device& lcd, const UiState& state, const char* message) {
+void drawIntervalPage(lgfx::LovyanGFX& lcd, const UiState& state, const char* message) {
   lcd.fillScreen(kBg);
   lcd.setFont(&fonts::Font2);
   lcd.setTextDatum(textdatum_t::top_center);
@@ -145,7 +145,7 @@ void drawIntervalPage(lgfx::LGFX_Device& lcd, const UiState& state, const char* 
   drawFooter(lcd, message);
 }
 
-void drawNetworkPage(lgfx::LGFX_Device& lcd, const UiState& state, const char* message) {
+void drawNetworkPage(lgfx::LovyanGFX& lcd, const UiState& state, const char* message) {
   lcd.fillScreen(kBg);
   lcd.setFont(&fonts::Font2);
   lcd.setTextDatum(textdatum_t::top_center);
@@ -184,6 +184,10 @@ void DisplayUi::begin() {
   screen_->setProfile(RotaryUi::Profile::Cardputer);
   screen_->setOverlay(&bootOverlay);
 
+  canvas_.setColorDepth(16);
+  canvas_.setPsram(true);
+  canvas_.createSprite(board::kWidth, board::kHeight);
+
   bootStartedMs_ = millis();
   showingBoot_ = true;
   ready_ = false;
@@ -203,24 +207,32 @@ void DisplayUi::renderBoot() {
 void DisplayUi::renderPage(const UiState& state) {
   switch (static_cast<SettingsPage>(state.settingsPage)) {
     case SettingsPage::Bpm:
-      drawBpmPage(lcd_, state, message_);
+      drawBpmPage(canvas_, state, message_);
       break;
     case SettingsPage::Click:
-      drawClickPage(lcd_, state, message_);
+      drawClickPage(canvas_, state, message_);
       break;
     case SettingsPage::Pulse:
-      drawPulsePage(lcd_, state, message_);
+      drawPulsePage(canvas_, state, message_);
       break;
     case SettingsPage::Interval:
-      drawIntervalPage(lcd_, state, message_);
+      drawIntervalPage(canvas_, state, message_);
       break;
     case SettingsPage::Network:
-      drawNetworkPage(lcd_, state, message_);
+      drawNetworkPage(canvas_, state, message_);
       break;
     default:
-      drawBpmPage(lcd_, state, message_);
+      drawBpmPage(canvas_, state, message_);
       break;
   }
+}
+
+void DisplayUi::pushFull() {
+  if (lcd_.getStartCount() > 0) {
+    lcd_.endWrite();
+  }
+  canvas_.pushSprite(0, 0);
+  lcd_.startWrite();
 }
 
 bool DisplayUi::stateChanged(const UiState& state) const {
@@ -255,6 +267,7 @@ void DisplayUi::render(const UiState& state) {
   }
 
   renderPage(state);
+  pushFull();
   lastRendered_ = state;
   strlcpy(lastMessage_, message_, sizeof(lastMessage_));
   ready_ = true;

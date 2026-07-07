@@ -41,9 +41,11 @@ class DisplayUi {
  private:
   void renderBoot();
   void renderPage(const UiState& state);
+  void pushFull();
   bool stateChanged(const UiState& state) const;
 
   PanelDisplay lcd_;
+  lgfx::LGFX_Sprite canvas_{&lcd_};
   RotaryUi::Screen* screen_ = nullptr;
   UiState lastRendered_{};
   char message_[48] = "";
