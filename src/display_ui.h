@@ -10,7 +10,7 @@ struct UiState {
   bool clickEnabled = false;
   bool pulseEnabled = true;
   int settingsPage = 0;
-  const char* clickInterval = "quarter";
+  char clickInterval[16] = "quarter";
 };
 
 class DisplayUi {

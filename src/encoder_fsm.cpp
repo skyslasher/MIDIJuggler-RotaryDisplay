@@ -50,7 +50,7 @@ void EncoderFsm::onSyncBpm(float bpm) {
   editBpm_ = bpm;
 }
 
-void EncoderFsm::consumePcnt(Result* result) {
+void EncoderFsm::consumePcnt(Result* result, int settingsPage) {
   int16_t count = 0;
   pcnt_get_counter_value(kPcntUnit, &count);
   pcnt_counter_clear(kPcntUnit);
@@ -72,6 +72,11 @@ void EncoderFsm::consumePcnt(Result* result) {
     return;
   }
 
+  if (settingsPage == 2) {
+    result->intervalStep += steps;
+    return;
+  }
+
   if (!editing_) {
     editing_ = true;
     rotatedWhileEditing_ = true;
@@ -86,15 +91,17 @@ void EncoderFsm::consumePcnt(Result* result) {
   result->newBpm = editBpm_;
 }
 
-EncoderFsm::Result EncoderFsm::update() {
+EncoderFsm::Result EncoderFsm::update(int settingsPage) {
   Result result;
   static uint8_t lastSwitch = HIGH;
 
-  consumePcnt(&result);
+  consumePcnt(&result, settingsPage);
 
   const uint8_t switchState = digitalRead(board::kEncoderSwitch);
   if (lastSwitch == HIGH && switchState == LOW) {
-    if (editing_ && rotatedWhileEditing_) {
+    if (settingsPage == 2) {
+      // Interval page: rotation only; tap is handled via touch.
+    } else if (editing_ && rotatedWhileEditing_) {
       confirmedBpm_ = editBpm_;
       editing_ = false;
       rotatedWhileEditing_ = false;
@@ -106,7 +113,7 @@ EncoderFsm::Result EncoderFsm::update() {
   }
   lastSwitch = switchState;
 
-  if (editing_ && millis() - editStartedMs_ >= kEditTimeoutMs) {
+  if (settingsPage != 2 && editing_ && millis() - editStartedMs_ >= kEditTimeoutMs) {
     editing_ = false;
     rotatedWhileEditing_ = false;
     editBpm_ = confirmedBpm_;

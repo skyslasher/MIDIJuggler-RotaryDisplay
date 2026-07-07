@@ -23,6 +23,8 @@ DeviceConfig gConfig;
 UiState gUi;
 bool gRenderDirty = true;
 
+void markDirty() { gRenderDirty = true; }
+
 const char* nextInterval(const char* current) {
   size_t index = 2;
   for (size_t i = 0; i < kIntervalCount; ++i) {
@@ -34,7 +36,35 @@ const char* nextInterval(const char* current) {
   return kIntervals[(index + 1) % kIntervalCount];
 }
 
-void markDirty() { gRenderDirty = true; }
+const char* prevInterval(const char* current) {
+  size_t index = 2;
+  for (size_t i = 0; i < kIntervalCount; ++i) {
+    if (strcmp(current, kIntervals[i]) == 0) {
+      index = i;
+      break;
+    }
+  }
+  return kIntervals[(index + kIntervalCount - 1) % kIntervalCount];
+}
+
+void applyIntervalStep(int steps) {
+  if (steps == 0) {
+    return;
+  }
+  const char* current = gUi.clickInterval;
+  if (steps > 0) {
+    for (int i = 0; i < steps; ++i) {
+      current = nextInterval(current);
+    }
+  } else {
+    for (int i = 0; i > steps; --i) {
+      current = prevInterval(current);
+    }
+  }
+  strlcpy(gUi.clickInterval, current, sizeof(gUi.clickInterval));
+  gTransport.sendInterval(gUi.clickInterval);
+  markDirty();
+}
 
 void applySync(const SyncPayload& payload) {
   if (!gEncoder.isEditing()) {
@@ -51,7 +81,7 @@ void applySync(const SyncPayload& payload) {
   }
   gUi.running = payload.running;
   gUi.clickEnabled = payload.clickEnabled;
-  gUi.clickInterval = payload.clickInterval;
+  strlcpy(gUi.clickInterval, payload.clickInterval, sizeof(gUi.clickInterval));
 }
 
 void onBeat(float beat) {
@@ -73,9 +103,7 @@ void handleSettingsAction(int page, bool tap) {
       markDirty();
       break;
     default:
-      gUi.clickInterval = nextInterval(gUi.clickInterval);
-      gTransport.sendInterval(gUi.clickInterval);
-      markDirty();
+      applyIntervalStep(1);
       break;
   }
 }
@@ -94,7 +122,7 @@ void setup() {
   gUi.pulseEnabled = gConfig.pulseEnabled;
   gUi.displayedBpm = 120.0f;
   gUi.confirmedBpm = 120.0f;
-  gUi.clickInterval = "quarter";
+  strlcpy(gUi.clickInterval, "quarter", sizeof(gUi.clickInterval));
 
   Serial.println("init display");
   gDisplay.begin();
@@ -121,8 +149,11 @@ void setup() {
 void loop() {
   const int previousPage = gUi.settingsPage;
 
-  const EncoderFsm::Result encoder = gEncoder.update();
+  const EncoderFsm::Result encoder = gEncoder.update(gUi.settingsPage);
   gUi.editing = gEncoder.isEditing();
+  if (encoder.intervalStep != 0) {
+    applyIntervalStep(encoder.intervalStep);
+  }
   if (encoder.bpmChanged) {
     gUi.displayedBpm = encoder.newBpm;
     markDirty();

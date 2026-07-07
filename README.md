@@ -17,6 +17,7 @@ Requires a running MIDIJuggler instance with the `rotary_display` module enabled
 |-----------|-----------|
 | `elecrow128` (default) | USB serial + WiFi/OSC |
 | `elecrow128-serial` | USB serial only |
+| `pi-serial` | USB serial only (Pi 5, fixed by-id port) |
 | `elecrow128-wifi` | WiFi/OSC only |
 
 ## Build
@@ -26,6 +27,18 @@ For **USB to the Mac** (recommended first):
 ```bash
 pio run -e elecrow128-serial -t upload --upload-port /dev/cu.usbmodemXXXX
 ```
+
+For **USB on Raspberry Pi 5** (encoder stays on the Pi; stop MIDIJuggler first):
+
+```bash
+sudo systemctl stop midijuggler
+pio run -e pi-serial -t upload
+sudo systemctl start midijuggler
+```
+
+The `pi-serial` environment sets `upload_port` / `monitor_port` in
+`platformio.ini` at the repo root. Adjust the by-id path there if your
+device ID differs (`ls /dev/serial/by-id/`).
 
 For **WiFi/OSC** (opens a setup hotspot `RotaryDisplay-Setup` on first boot):
 
