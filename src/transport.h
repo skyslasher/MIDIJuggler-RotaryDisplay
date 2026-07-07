@@ -36,6 +36,7 @@ class Transport {
   uint16_t listenPort_ = 9001;
   char serialLine_[96] = "";
   size_t serialLength_ = 0;
+  uint32_t lastHelloMs_ = 0;
   std::function<void(const char* line)> configHandler_;
 
   void sendSerialLine(const char* line);

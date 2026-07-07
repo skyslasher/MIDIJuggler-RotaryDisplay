@@ -108,6 +108,7 @@ void Transport::begin(const DeviceConfig& config, SyncCallback onSync, BeatCallb
     }
   }
   if (useSerial_) {
+    lastHelloMs_ = millis();
     sendSerialLine("hello");
   }
 }
@@ -115,6 +116,11 @@ void Transport::begin(const DeviceConfig& config, SyncCallback onSync, BeatCallb
 void Transport::loop() {
   if (useSerial_) {
     pollSerial();
+    const uint32_t now = millis();
+    if (now - lastHelloMs_ >= 3000) {
+      lastHelloMs_ = now;
+      sendSerialLine("hello");
+    }
   }
   if (useWifi_ && WiFi.status() == WL_CONNECTED) {
     pollOsc();
