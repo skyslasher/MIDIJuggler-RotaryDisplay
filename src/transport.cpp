@@ -25,6 +25,53 @@ WiFiUDP gRx;
 
 size_t pad4(size_t size) { return (size + 3) & ~static_cast<size_t>(3); }
 
+uint32_t readU32BE(const uint8_t* data) {
+  return (static_cast<uint32_t>(data[0]) << 24) | (static_cast<uint32_t>(data[1]) << 16) |
+         (static_cast<uint32_t>(data[2]) << 8) | static_cast<uint32_t>(data[3]);
+}
+
+int32_t readI32BE(const uint8_t* data) { return static_cast<int32_t>(readU32BE(data)); }
+
+float readFloatBE(const uint8_t* data) {
+  union {
+    uint32_t u;
+    float f;
+  } value;
+  value.u = readU32BE(data);
+  return value.f;
+}
+
+void writeU32BE(uint8_t* data, uint32_t value) {
+  data[0] = static_cast<uint8_t>((value >> 24) & 0xFF);
+  data[1] = static_cast<uint8_t>((value >> 16) & 0xFF);
+  data[2] = static_cast<uint8_t>((value >> 8) & 0xFF);
+  data[3] = static_cast<uint8_t>(value & 0xFF);
+}
+
+void writeI32BE(uint8_t* data, int32_t value) {
+  writeU32BE(data, static_cast<uint32_t>(value));
+}
+
+void writeFloatBE(uint8_t* data, float value) {
+  union {
+    float f;
+    uint32_t u;
+  } raw;
+  raw.f = value;
+  writeU32BE(data, raw.u);
+}
+
+size_t oscTagsOffset(const char* address) { return pad4(strlen(address) + 1); }
+
+const char* oscTags(const uint8_t* buffer, const char* address) {
+  return reinterpret_cast<const char*>(buffer + oscTagsOffset(address));
+}
+
+size_t oscFirstArgOffset(const uint8_t* buffer, const char* address) {
+  const char* tags = oscTags(buffer, address);
+  return oscTagsOffset(address) + pad4(strlen(tags) + 1);
+}
+
 void sendOscPacket(const char* host, uint16_t port, const uint8_t* data, size_t length) {
   gTx.beginPacket(host, port);
   gTx.write(data, length);
@@ -40,7 +87,7 @@ void sendOscFloat(const char* host, uint16_t port, const char* address, float va
   const char* tags = ",f";
   memcpy(packet + offset, tags, 3);
   offset += pad4(3);
-  memcpy(packet + offset, &value, sizeof(value));
+  writeFloatBE(packet + offset, value);
   offset += sizeof(value);
   sendOscPacket(host, port, packet, offset);
 }
@@ -72,9 +119,8 @@ void sendOscHelloPacket(const char* host, uint16_t port, const char* ip, uint16_
   const size_t ipLen = pad4(strlen(ip) + 1);
   memcpy(packet + offset, ip, strlen(ip) + 1);
   offset += ipLen;
-  const int32_t portValue = listenPort;
-  memcpy(packet + offset, &portValue, sizeof(portValue));
-  offset += sizeof(portValue);
+  writeI32BE(packet + offset, static_cast<int32_t>(listenPort));
+  offset += sizeof(listenPort);
   sendOscPacket(host, port, packet, offset);
 }
 
@@ -87,9 +133,8 @@ void sendOscTrigger(const char* host, uint16_t port, const char* address) {
   const char* tags = ",i";
   memcpy(packet + offset, tags, 3);
   offset += pad4(3);
-  const int32_t value = 1;
-  memcpy(packet + offset, &value, sizeof(value));
-  offset += sizeof(value);
+  writeI32BE(packet + offset, 1);
+  offset += sizeof(int32_t);
   sendOscPacket(host, port, packet, offset);
 }
 
@@ -451,10 +496,9 @@ void Transport::pollOsc() {
   char address[64] = {0};
   memcpy(address, buffer, min(static_cast<size_t>(read), sizeof(address) - 1));
   if (strcmp(address, kBeatAddress) == 0) {
-    float beat = 0.0f;
-    const size_t offset = pad4(strlen(address) + 1) + pad4(2);
-    if (static_cast<size_t>(read) >= offset + sizeof(beat)) {
-      memcpy(&beat, buffer + offset, sizeof(beat));
+    const size_t offset = oscFirstArgOffset(buffer, address);
+    if (static_cast<size_t>(read) >= offset + sizeof(float)) {
+      const float beat = readFloatBE(buffer + offset);
       if (onBeat_) {
         onBeat_(beat);
       }
@@ -462,37 +506,35 @@ void Transport::pollOsc() {
     return;
   }
   if (strcmp(address, kFeedbackBpmAddress) == 0) {
-    float bpm = pendingSync_.bpm;
-    const size_t offset = pad4(strlen(address) + 1) + pad4(2);
-    if (static_cast<size_t>(read) >= offset + sizeof(bpm)) {
-      memcpy(&bpm, buffer + offset, sizeof(bpm));
-      pendingSync_.bpm = bpm;
+    const size_t offset = oscFirstArgOffset(buffer, address);
+    if (static_cast<size_t>(read) >= offset + sizeof(float)) {
+      pendingSync_.bpm = readFloatBE(buffer + offset);
       emitSync();
     }
     return;
   }
   if (strcmp(address, kFeedbackRunningAddress) == 0) {
-    int32_t running = 0;
-    const size_t offset = pad4(strlen(address) + 1) + pad4(2);
-    if (static_cast<size_t>(read) >= offset + sizeof(running)) {
-      memcpy(&running, buffer + offset, sizeof(running));
-      pendingSync_.running = running != 0;
+    const size_t offset = oscFirstArgOffset(buffer, address);
+    if (static_cast<size_t>(read) >= offset + sizeof(int32_t)) {
+      pendingSync_.running = readI32BE(buffer + offset) != 0;
       emitSync();
     }
     return;
   }
   if (strcmp(address, kFeedbackClickEnabledAddress) == 0) {
-    int32_t clickEnabled = 0;
-    const size_t offset = pad4(strlen(address) + 1) + pad4(2);
-    if (static_cast<size_t>(read) >= offset + sizeof(clickEnabled)) {
-      memcpy(&clickEnabled, buffer + offset, sizeof(clickEnabled));
-      pendingSync_.clickEnabled = clickEnabled != 0;
+    const size_t offset = oscFirstArgOffset(buffer, address);
+    if (static_cast<size_t>(read) >= offset + sizeof(int32_t)) {
+      pendingSync_.clickEnabled = readI32BE(buffer + offset) != 0;
       emitSync();
     }
     return;
   }
   if (strcmp(address, kFeedbackClickIntervalAddress) == 0) {
-    const size_t offset = pad4(strlen(address) + 1) + pad4(2);
+    const char* tags = oscTags(buffer, address);
+    if (tags[1] != 's') {
+      return;
+    }
+    const size_t offset = oscFirstArgOffset(buffer, address);
     if (offset < static_cast<size_t>(read)) {
       strlcpy(pendingSync_.clickInterval, reinterpret_cast<const char*>(buffer + offset),
               sizeof(pendingSync_.clickInterval));
@@ -503,24 +545,44 @@ void Transport::pollOsc() {
   if (strcmp(address, kSyncAddress) != 0) {
     return;
   }
+  const char* tags = oscTags(buffer, address);
+  size_t offset = oscFirstArgOffset(buffer, address);
   SyncPayload payload;
-  size_t offset = pad4(strlen(address) + 1) + pad4(2);
-  if (static_cast<size_t>(read) < offset + 12) {
-    return;
-  }
-  memcpy(&payload.bpm, buffer + offset, sizeof(payload.bpm));
-  offset += 4;
-  int32_t running = 0;
-  int32_t clickEnabled = 0;
-  memcpy(&running, buffer + offset, sizeof(running));
-  offset += 4;
-  memcpy(&clickEnabled, buffer + offset, sizeof(clickEnabled));
-  offset += 4;
-  payload.running = running != 0;
-  payload.clickEnabled = clickEnabled != 0;
-  if (offset < static_cast<size_t>(read)) {
-    strlcpy(payload.clickInterval, reinterpret_cast<const char*>(buffer + offset),
-            sizeof(payload.clickInterval));
+  int intArgIndex = 0;
+  for (size_t i = 1; tags[i] != '\0'; ++i) {
+    switch (tags[i]) {
+      case 'f':
+        if (static_cast<size_t>(read) < offset + sizeof(float)) {
+          return;
+        }
+        payload.bpm = readFloatBE(buffer + offset);
+        offset += sizeof(float);
+        break;
+      case 'i': {
+        if (static_cast<size_t>(read) < offset + sizeof(int32_t)) {
+          return;
+        }
+        const int32_t value = readI32BE(buffer + offset);
+        offset += sizeof(int32_t);
+        if (intArgIndex == 0) {
+          payload.running = value != 0;
+        } else {
+          payload.clickEnabled = value != 0;
+        }
+        ++intArgIndex;
+        break;
+      }
+      case 's':
+        if (offset >= static_cast<size_t>(read)) {
+          return;
+        }
+        strlcpy(payload.clickInterval, reinterpret_cast<const char*>(buffer + offset),
+                sizeof(payload.clickInterval));
+        offset += pad4(strlen(reinterpret_cast<const char*>(buffer + offset)) + 1);
+        break;
+      default:
+        return;
+    }
   }
   pendingSync_ = payload;
   if (onSync_) {
