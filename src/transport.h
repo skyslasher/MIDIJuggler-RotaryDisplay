@@ -61,6 +61,10 @@ class Transport {
   bool handleConfigLine(const char* line);
   void connectWifi(const DeviceConfig& config, bool runPortal);
   void disconnectWifi();
+  void onWifiReady();
+  void startMdns();
+  void stopMdns();
+  void feedbackAddress(char* buffer, size_t length) const;
   void sendOscBpm(float bpm);
   void sendOscInterval(const char* interval);
   void sendOscHello();

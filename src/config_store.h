@@ -10,6 +10,7 @@ struct DeviceConfig {
   char wifiSsid[33] = "";
   char wifiPass[65] = "";
   char host[48] = "midijuggler.local";
+  char mdnsHostname[32] = "";
   uint16_t oscPort = 9000;
   uint16_t listenPort = 9001;
   bool pulseEnabled = true;

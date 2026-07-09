@@ -1,6 +1,7 @@
 #include "transport.h"
 
 #include <Arduino.h>
+#include <ESPmDNS.h>
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <WiFiUdp.h>
@@ -331,6 +332,12 @@ void Transport::emitConfigGet() {
   sendConfigLine("cfg wifi_pass=***");
   snprintf(line, sizeof(line), "cfg host=%s", config.host);
   sendConfigLine(line);
+  if (config.mdnsHostname[0] != '\0') {
+    snprintf(line, sizeof(line), "cfg mdns_hostname=%s", config.mdnsHostname);
+  } else {
+    snprintf(line, sizeof(line), "cfg mdns_hostname=(auto)");
+  }
+  sendConfigLine(line);
   snprintf(line, sizeof(line), "cfg port=%u", config.oscPort);
   sendConfigLine(line);
   snprintf(line, sizeof(line), "cfg listen_port=%u", config.listenPort);
@@ -414,8 +421,7 @@ void Transport::connectWifi(const DeviceConfig& config, bool runPortal) {
     manager.setConfigPortalTimeout(120);
     manager.autoConnect("RotaryDisplay-Setup");
     if (WiFi.status() == WL_CONNECTED) {
-      gRx.begin(listenPort_);
-      wifiRxReady_ = true;
+      onWifiReady();
     }
     return;
   }
@@ -437,21 +443,75 @@ void Transport::maintainWifi() {
     if (wifiRxReady_) {
       gRx.stop();
       wifiRxReady_ = false;
+      stopMdns();
     }
     return;
   }
   if (wifiRxReady_) {
     return;
   }
+  onWifiReady();
+}
+
+void Transport::onWifiReady() {
   gRx.begin(listenPort_);
   wifiRxReady_ = true;
+  startMdns();
   lastOscHelloMs_ = millis();
   sendOscHello();
+}
+
+void Transport::startMdns() {
+  stopMdns();
+  if (!useWifiClock_ || !wifiEnabled_ || WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+
+  char hostname[32] = {0};
+  if (deviceConfig_ != nullptr && deviceConfig_->mdnsHostname[0] != '\0') {
+    strlcpy(hostname, deviceConfig_->mdnsHostname, sizeof(hostname));
+  } else {
+    uint8_t mac[6] = {0};
+    WiFi.macAddress(mac);
+    snprintf(hostname, sizeof(hostname), "rotary-%02x%02x%02x", mac[3], mac[4], mac[5]);
+  }
+
+  if (!MDNS.begin(hostname)) {
+    Serial.println("mdns: begin failed");
+    return;
+  }
+  MDNS.addService("midijuggler-rotary", "udp", listenPort_);
+  Serial.printf("mdns: advertised %s.local\n", hostname);
+}
+
+void Transport::stopMdns() { MDNS.end(); }
+
+void Transport::feedbackAddress(char* buffer, size_t length) const {
+  if (buffer == nullptr || length == 0) {
+    return;
+  }
+  buffer[0] = '\0';
+
+  char hostname[32] = {0};
+  if (deviceConfig_ != nullptr && deviceConfig_->mdnsHostname[0] != '\0') {
+    strlcpy(hostname, deviceConfig_->mdnsHostname, sizeof(hostname));
+  } else if (WiFi.status() == WL_CONNECTED) {
+    uint8_t mac[6] = {0};
+    WiFi.macAddress(mac);
+    snprintf(hostname, sizeof(hostname), "rotary-%02x%02x%02x", mac[3], mac[4], mac[5]);
+  }
+
+  if (hostname[0] == '\0') {
+    strlcpy(buffer, WiFi.localIP().toString().c_str(), length);
+    return;
+  }
+  snprintf(buffer, length, "%s.local", hostname);
 }
 
 void Transport::disconnectWifi() {
   gRx.stop();
   wifiRxReady_ = false;
+  stopMdns();
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
 }
@@ -463,7 +523,9 @@ void Transport::sendOscInterval(const char* interval) {
 }
 
 void Transport::sendOscHello() {
-  sendOscHelloPacket(host_, oscPort_, WiFi.localIP().toString().c_str(), listenPort_);
+  char feedbackHost[64] = {0};
+  feedbackAddress(feedbackHost, sizeof(feedbackHost));
+  sendOscHelloPacket(host_, oscPort_, feedbackHost, listenPort_);
 }
 
 void Transport::emitSync() {

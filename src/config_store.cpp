@@ -90,6 +90,7 @@ void ConfigStore::load(DeviceConfig* config) {
   prefs_.getString("wifi_ssid", config->wifiSsid, sizeof(config->wifiSsid));
   prefs_.getString("wifi_pass", config->wifiPass, sizeof(config->wifiPass));
   prefs_.getString("host", config->host, sizeof(config->host));
+  prefs_.getString("mdns_host", config->mdnsHostname, sizeof(config->mdnsHostname));
   config->oscPort = prefs_.getUShort("osc_port", 9000);
   config->listenPort = prefs_.getUShort("listen_port", 9001);
   config->pulseEnabled = prefs_.getBool("pulse", true);
@@ -102,6 +103,7 @@ void ConfigStore::save(const DeviceConfig& config) {
   prefs_.putString("wifi_ssid", config.wifiSsid);
   prefs_.putString("wifi_pass", config.wifiPass);
   prefs_.putString("host", config.host);
+  prefs_.putString("mdns_host", config.mdnsHostname);
   prefs_.putUShort("osc_port", config.oscPort);
   prefs_.putUShort("listen_port", config.listenPort);
   prefs_.putBool("pulse", config.pulseEnabled);
@@ -122,6 +124,14 @@ bool ConfigStore::stageSerialCommand(const char* line, DeviceConfig* config) {
 
   if (strncmp(line, "host ", 5) == 0) {
     copyRestOfLine(line, 5, config->host, sizeof(config->host));
+    return true;
+  }
+  if (strncmp(line, "mdns_hostname ", 14) == 0) {
+    if (strcmp(line + 14, "clear") == 0) {
+      config->mdnsHostname[0] = '\0';
+      return true;
+    }
+    copyRestOfLine(line, 14, config->mdnsHostname, sizeof(config->mdnsHostname));
     return true;
   }
   if (strncmp(line, "port ", 5) == 0) {
