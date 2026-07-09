@@ -151,6 +151,8 @@ void Transport::setConfigAppliedCallback(ConfigAppliedCallback callback) {
 }
 
 void Transport::applyConfig(const DeviceConfig& config, bool runWifiPortal) {
+  const bool wasSerialClock = useSerialClock_;
+  const bool wasWifiClock = useWifiClock_;
   strlcpy(host_, config.host, sizeof(host_));
   oscPort_ = config.oscPort;
   listenPort_ = config.listenPort;
@@ -162,6 +164,15 @@ void Transport::applyConfig(const DeviceConfig& config, bool runWifiPortal) {
     connectWifi(config, runWifiPortal);
   } else {
     disconnectWifi();
+  }
+
+  const bool transportChanged = wasSerialClock != useSerialClock_ || wasWifiClock != useWifiClock_;
+  if (transportChanged) {
+    // Force OSC hello after serial->wifi switches; stale serial sync masked registration.
+    lastSyncMs_ = 0;
+    lastHelloMs_ = millis();
+    lastOscHelloMs_ = millis();
+    sendHello();
   }
 }
 
