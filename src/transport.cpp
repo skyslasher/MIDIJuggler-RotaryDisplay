@@ -756,6 +756,12 @@ void Transport::dispatchLine(const char* line) {
     return;
   }
 
+  if (strcmp(line, "hello") == 0) {
+    // Host may poke hello over USB when switching to OSC feedback.
+    sendHello();
+    return;
+  }
+
   SyncPayload payload;
   float beat = 0.0f;
   if (parseSyncLine(line, &payload)) {
