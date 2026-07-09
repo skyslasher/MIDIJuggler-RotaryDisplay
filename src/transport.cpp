@@ -121,7 +121,7 @@ void sendOscHelloPacket(const char* host, uint16_t port, const char* ip, uint16_
   memcpy(packet + offset, ip, strlen(ip) + 1);
   offset += ipLen;
   writeI32BE(packet + offset, static_cast<int32_t>(listenPort));
-  offset += sizeof(listenPort);
+  offset += sizeof(int32_t);
   sendOscPacket(host, port, packet, offset);
 }
 
