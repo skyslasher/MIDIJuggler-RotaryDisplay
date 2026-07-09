@@ -48,6 +48,7 @@ class Transport {
   char serialLine_[128] = "";
   size_t serialLength_ = 0;
   uint32_t lastHelloMs_ = 0;
+  uint32_t lastOscHelloMs_ = 0;
   uint32_t lastSyncMs_ = 0;
   bool wifiRxReady_ = false;
   SyncPayload pendingSync_;

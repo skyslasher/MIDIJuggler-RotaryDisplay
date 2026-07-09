@@ -193,6 +193,13 @@ void Transport::loop() {
   }
   if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
     pollOsc();
+    if (!isOscConnected()) {
+      const uint32_t now = millis();
+      if (now - lastOscHelloMs_ >= 3000) {
+        lastOscHelloMs_ = now;
+        sendOscHello();
+      }
+    }
   }
 }
 
@@ -438,6 +445,7 @@ void Transport::maintainWifi() {
   }
   gRx.begin(listenPort_);
   wifiRxReady_ = true;
+  lastOscHelloMs_ = millis();
   sendOscHello();
 }
 
