@@ -560,16 +560,9 @@ void Transport::deliverBeat(float beat) {
     return;
   }
   const uint32_t now = millis();
-  uint32_t minGapMs = 60;
-  if (pendingSync_.bpm > 1.0f) {
-    minGapMs = static_cast<uint32_t>((60000.0f / pendingSync_.bpm) * 0.35f);
-    if (minGapMs < 40) {
-      minGapMs = 40;
-    } else if (minGapMs > 200) {
-      minGapMs = 200;
-    }
-  }
-  if (lastBeatPulseMs_ != 0 && now - lastBeatPulseMs_ < minGapMs) {
+  // Collapse duplicate serial/OSC delivery and same-loop serial bursts only.
+  constexpr uint32_t kDuplicateBeatDedupMs = 25;
+  if (lastBeatPulseMs_ != 0 && now - lastBeatPulseMs_ < kDuplicateBeatDedupMs) {
     return;
   }
   lastBeatPulseMs_ = now;
