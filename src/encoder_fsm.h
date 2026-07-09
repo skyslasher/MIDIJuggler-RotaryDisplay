@@ -22,6 +22,8 @@ class EncoderFsm {
   void onSyncBpm(float bpm);
   void onSyncInterval(const char* interval);
   void cancelIntervalEdit();
+  void confirmLocalBpm(float bpm);
+  bool shouldRejectSyncBpm(float bpm);
   bool isEditing() const { return editing_; }
   bool isEditingInterval() const { return editingInterval_; }
   Result update(int settingsPage = 0);
@@ -42,4 +44,6 @@ class EncoderFsm {
   bool rotatedWhileEditingInterval_ = false;
   uint32_t editStartedMs_ = 0;
   int32_t pcntRemainder_ = 0;
+  float pendingLocalBpm_ = -1.0f;
+  uint32_t pendingLocalBpmMs_ = 0;
 };

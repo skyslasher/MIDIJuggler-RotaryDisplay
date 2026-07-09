@@ -1,6 +1,7 @@
 #include "encoder_fsm.h"
 
 #include <driver/pcnt.h>
+#include <math.h>
 
 #include "board.h"
 #include "display_ui.h"
@@ -8,6 +9,8 @@
 namespace {
 
 constexpr uint32_t kEditTimeoutMs = 5000;
+constexpr uint32_t kPendingLocalBpmTimeoutMs = 3000;
+constexpr float kPendingLocalBpmTolerance = 0.05f;
 constexpr pcnt_unit_t kPcntUnit = PCNT_UNIT_0;
 constexpr int kPulsesPerDetent = 2;
 
@@ -64,8 +67,31 @@ void EncoderFsm::begin(float bpmMin, float bpmMax, float step) {
   initPcnt();
 }
 
+void EncoderFsm::confirmLocalBpm(float bpm) {
+  pendingLocalBpm_ = bpm;
+  pendingLocalBpmMs_ = millis();
+}
+
+bool EncoderFsm::shouldRejectSyncBpm(float bpm) {
+  if (pendingLocalBpm_ < 0.0f) {
+    return false;
+  }
+  if (millis() - pendingLocalBpmMs_ >= kPendingLocalBpmTimeoutMs) {
+    pendingLocalBpm_ = -1.0f;
+    return false;
+  }
+  if (fabsf(bpm - pendingLocalBpm_) <= kPendingLocalBpmTolerance) {
+    pendingLocalBpm_ = -1.0f;
+    return false;
+  }
+  return true;
+}
+
 void EncoderFsm::onSyncBpm(float bpm) {
   if (editing_) {
+    return;
+  }
+  if (shouldRejectSyncBpm(bpm)) {
     return;
   }
   confirmedBpm_ = bpm;

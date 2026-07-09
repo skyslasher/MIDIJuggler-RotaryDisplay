@@ -38,7 +38,7 @@ void updateNetworkStatus() {
 }
 
 void applySync(const SyncPayload& payload) {
-  if (!gEncoder.isEditing()) {
+  if (!gEncoder.isEditing() && !gEncoder.shouldRejectSyncBpm(payload.bpm)) {
     if (gUi.displayedBpm != payload.bpm || gUi.confirmedBpm != payload.bpm) {
       markDirty();
     }
@@ -139,6 +139,7 @@ void loop() {
   if (encoder.confirmEdit) {
     gUi.displayedBpm = encoder.newBpm;
     gUi.confirmedBpm = encoder.newBpm;
+    gEncoder.confirmLocalBpm(encoder.newBpm);
     gTransport.sendBpm(encoder.newBpm);
     markDirty();
   }
