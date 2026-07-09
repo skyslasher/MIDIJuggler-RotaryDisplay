@@ -546,13 +546,9 @@ void Transport::sendOscHello() {
 }
 
 bool Transport::shouldAcceptSerialBeat() const {
-  if (!useSerialClock_) {
-    return false;
-  }
-  if (!useWifiClock_) {
-    return true;
-  }
-  return WiFi.status() != WL_CONNECTED;
+  // Host sends beats on serial when OSC feedback is not registered, even with
+  // WiFi up. Rejecting serial beats while connected silenced the LED entirely.
+  return useSerialClock_;
 }
 
 bool Transport::shouldAcceptOscBeat() const {

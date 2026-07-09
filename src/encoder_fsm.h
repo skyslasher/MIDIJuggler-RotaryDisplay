@@ -50,4 +50,5 @@ class EncoderFsm {
   int32_t pcntRemainder_ = 0;
   float pendingLocalBpm_ = -1.0f;
   uint32_t pendingLocalBpmMs_ = 0;
+  uint32_t tapTempoBlockedUntilMs_ = 0;
 };

@@ -10,6 +10,7 @@ namespace {
 
 constexpr uint32_t kEditTimeoutMs = 5000;
 constexpr uint32_t kPendingLocalBpmTimeoutMs = 3000;
+constexpr uint32_t kTapTempoBlockAfterConfirmMs = 3000;
 constexpr float kPendingLocalBpmTolerance = 0.05f;
 constexpr pcnt_unit_t kPcntUnit = PCNT_UNIT_0;
 constexpr int kPulsesPerDetent = 2;
@@ -70,6 +71,7 @@ void EncoderFsm::begin(float bpmMin, float bpmMax, float step) {
 void EncoderFsm::confirmLocalBpm(float bpm) {
   pendingLocalBpm_ = bpm;
   pendingLocalBpmMs_ = millis();
+  tapTempoBlockedUntilMs_ = millis() + kTapTempoBlockAfterConfirmMs;
 }
 
 void EncoderFsm::clearExpiredPendingLocalBpm() {
@@ -81,6 +83,9 @@ void EncoderFsm::clearExpiredPendingLocalBpm() {
 
 bool EncoderFsm::isBpmTransferPending() {
   if (editing_) {
+    return true;
+  }
+  if (tapTempoBlockedUntilMs_ != 0 && millis() < tapTempoBlockedUntilMs_) {
     return true;
   }
   clearExpiredPendingLocalBpm();
