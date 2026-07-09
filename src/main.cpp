@@ -63,6 +63,9 @@ void applySync(const SyncPayload& payload) {
 }
 
 void onBeat(float beat) {
+  if (!gUi.running) {
+    return;
+  }
   gLeds.pulse(gUi.pulseEnabled, beat);
 }
 
