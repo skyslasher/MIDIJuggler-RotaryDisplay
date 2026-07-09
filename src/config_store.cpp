@@ -41,6 +41,47 @@ void copyRestOfLine(const char* line, size_t prefixLen, char* dest, size_t destS
   strlcpy(dest, line + prefixLen, destSize);
 }
 
+bool parseHexNibble(char c, uint8_t* out) {
+  if (c >= '0' && c <= '9') {
+    *out = static_cast<uint8_t>(c - '0');
+    return true;
+  }
+  if (c >= 'a' && c <= 'f') {
+    *out = static_cast<uint8_t>(10 + c - 'a');
+    return true;
+  }
+  if (c >= 'A' && c <= 'F') {
+    *out = static_cast<uint8_t>(10 + c - 'A');
+    return true;
+  }
+  return false;
+}
+
+bool parseHexColor(const char* value, uint8_t* r, uint8_t* g, uint8_t* b) {
+  if (value == nullptr || r == nullptr || g == nullptr || b == nullptr) {
+    return false;
+  }
+  while (*value == ' ') {
+    value++;
+  }
+  if (*value == '#') {
+    value++;
+  }
+  if (strlen(value) != 6) {
+    return false;
+  }
+  uint8_t nibbles[6];
+  for (int i = 0; i < 6; ++i) {
+    if (!parseHexNibble(value[i], &nibbles[i])) {
+      return false;
+    }
+  }
+  *r = static_cast<uint8_t>((nibbles[0] << 4) | nibbles[1]);
+  *g = static_cast<uint8_t>((nibbles[2] << 4) | nibbles[3]);
+  *b = static_cast<uint8_t>((nibbles[4] << 4) | nibbles[5]);
+  return true;
+}
+
 }  // namespace
 
 void ConfigStore::begin() { prefs_.begin(kNamespace, false); }
@@ -95,6 +136,9 @@ void ConfigStore::load(DeviceConfig* config) {
   config->listenPort = prefs_.getUShort("listen_port", 9001);
   config->pulseEnabled = prefs_.getBool("pulse", true);
   config->bpmStep = prefs_.getFloat("bpm_step", 1.0f);
+  config->beatLedR = static_cast<uint8_t>(prefs_.getUChar("beat_r", 30));
+  config->beatLedG = static_cast<uint8_t>(prefs_.getUChar("beat_g", 255));
+  config->beatLedB = static_cast<uint8_t>(prefs_.getUChar("beat_b", 120));
 }
 
 void ConfigStore::save(const DeviceConfig& config) {
@@ -108,6 +152,9 @@ void ConfigStore::save(const DeviceConfig& config) {
   prefs_.putUShort("listen_port", config.listenPort);
   prefs_.putBool("pulse", config.pulseEnabled);
   prefs_.putFloat("bpm_step", config.bpmStep);
+  prefs_.putUChar("beat_r", config.beatLedR);
+  prefs_.putUChar("beat_g", config.beatLedG);
+  prefs_.putUChar("beat_b", config.beatLedB);
 }
 
 void ConfigStore::resetDefaults(DeviceConfig* config) {
@@ -168,6 +215,17 @@ bool ConfigStore::stageSerialCommand(const char* line, DeviceConfig* config) {
   if (strcmp(line, "wifi clear") == 0) {
     config->wifiSsid[0] = '\0';
     config->wifiPass[0] = '\0';
+    return true;
+  }
+  if (strncmp(line, "beat_led_color ", 15) == 0) {
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+    if (parseHexColor(line + 15, &r, &g, &b)) {
+      config->beatLedR = r;
+      config->beatLedG = g;
+      config->beatLedB = b;
+    }
     return true;
   }
 

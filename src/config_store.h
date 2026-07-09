@@ -15,6 +15,9 @@ struct DeviceConfig {
   uint16_t listenPort = 9001;
   bool pulseEnabled = true;
   float bpmStep = 1.0f;
+  uint8_t beatLedR = 30;
+  uint8_t beatLedG = 255;
+  uint8_t beatLedB = 120;
 };
 
 class ConfigStore {

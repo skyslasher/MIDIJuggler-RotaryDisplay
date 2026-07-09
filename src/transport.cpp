@@ -146,6 +146,10 @@ void Transport::setConfigStore(ConfigStore* store, DeviceConfig* config) {
   deviceConfig_ = config;
 }
 
+void Transport::setConfigAppliedCallback(ConfigAppliedCallback callback) {
+  configAppliedCallback_ = std::move(callback);
+}
+
 void Transport::applyConfig(const DeviceConfig& config, bool runWifiPortal) {
   strlcpy(host_, config.host, sizeof(host_));
   oscPort_ = config.oscPort;
@@ -272,7 +276,7 @@ const char* Transport::wifiSsid() const {
   if (!isWifiConnected()) {
     return "";
   }
-  return WiFi.SSID().c_str();
+  return connectedSsid_;
 }
 
 const char* Transport::wifiStatus() const {
@@ -346,6 +350,9 @@ void Transport::emitConfigGet() {
   sendConfigLine(line);
   snprintf(line, sizeof(line), "cfg bpm_step=%.1f", config.bpmStep);
   sendConfigLine(line);
+  snprintf(line, sizeof(line), "cfg beat_led_color=#%02X%02X%02X", config.beatLedR, config.beatLedG,
+           config.beatLedB);
+  sendConfigLine(line);
 }
 
 bool Transport::handleConfigLine(const char* line) {
@@ -366,6 +373,9 @@ bool Transport::handleConfigLine(const char* line) {
     }
     configStore_->save(*deviceConfig_);
     applyConfig(*deviceConfig_, false);
+    if (configAppliedCallback_) {
+      configAppliedCallback_(*deviceConfig_);
+    }
     sendConfigLine("ok");
     return true;
   }
@@ -378,6 +388,9 @@ bool Transport::handleConfigLine(const char* line) {
     configStore_->resetDefaults(deviceConfig_);
     configStore_->save(*deviceConfig_);
     applyConfig(*deviceConfig_, false);
+    if (configAppliedCallback_) {
+      configAppliedCallback_(*deviceConfig_);
+    }
     sendConfigLine("ok");
     return true;
   }
@@ -407,6 +420,7 @@ bool Transport::handleConfigLine(const char* line) {
 void Transport::connectWifi(const DeviceConfig& config, bool runPortal) {
   gRx.stop();
   wifiRxReady_ = false;
+  connectedSsid_[0] = '\0';
   WiFi.disconnect(true);
 
   if (!wifiEnabled_) {
@@ -443,6 +457,7 @@ void Transport::maintainWifi() {
     if (wifiRxReady_) {
       gRx.stop();
       wifiRxReady_ = false;
+      connectedSsid_[0] = '\0';
       stopMdns();
     }
     return;
@@ -454,6 +469,7 @@ void Transport::maintainWifi() {
 }
 
 void Transport::onWifiReady() {
+  strlcpy(connectedSsid_, WiFi.SSID().c_str(), sizeof(connectedSsid_));
   gRx.begin(listenPort_);
   wifiRxReady_ = true;
   startMdns();
@@ -511,6 +527,7 @@ void Transport::feedbackAddress(char* buffer, size_t length) const {
 void Transport::disconnectWifi() {
   gRx.stop();
   wifiRxReady_ = false;
+  connectedSsid_[0] = '\0';
   stopMdns();
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
@@ -526,6 +543,41 @@ void Transport::sendOscHello() {
   char feedbackHost[64] = {0};
   feedbackAddress(feedbackHost, sizeof(feedbackHost));
   sendOscHelloPacket(host_, oscPort_, feedbackHost, listenPort_);
+}
+
+bool Transport::shouldAcceptSerialBeat() const {
+  if (!useSerialClock_) {
+    return false;
+  }
+  if (!useWifiClock_) {
+    return true;
+  }
+  return WiFi.status() != WL_CONNECTED;
+}
+
+bool Transport::shouldAcceptOscBeat() const {
+  return useWifiClock_;
+}
+
+void Transport::deliverBeat(float beat) {
+  if (beat <= 0.5f || !onBeat_) {
+    return;
+  }
+  const uint32_t now = millis();
+  uint32_t minGapMs = 60;
+  if (pendingSync_.bpm > 1.0f) {
+    minGapMs = static_cast<uint32_t>((60000.0f / pendingSync_.bpm) * 0.35f);
+    if (minGapMs < 40) {
+      minGapMs = 40;
+    } else if (minGapMs > 200) {
+      minGapMs = 200;
+    }
+  }
+  if (lastBeatPulseMs_ != 0 && now - lastBeatPulseMs_ < minGapMs) {
+    return;
+  }
+  lastBeatPulseMs_ = now;
+  onBeat_(beat);
 }
 
 void Transport::emitSync() {
@@ -570,8 +622,8 @@ void Transport::pollOsc() {
       const size_t offset = oscFirstArgOffset(buffer, address);
       if (static_cast<size_t>(read) >= offset + sizeof(float)) {
         const float beat = readFloatBE(buffer + offset);
-        if (onBeat_) {
-          onBeat_(beat);
+        if (shouldAcceptOscBeat()) {
+          deliverBeat(beat);
         }
       }
       continue;
@@ -715,8 +767,8 @@ void Transport::dispatchLine(const char* line) {
     return;
   }
   if (parseBeatLine(line, &beat)) {
-    if (onBeat_) {
-      onBeat_(beat);
+    if (shouldAcceptSerialBeat()) {
+      deliverBeat(beat);
     }
   }
 }

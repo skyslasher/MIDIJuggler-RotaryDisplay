@@ -13,12 +13,14 @@ struct SyncPayload {
 
 using SyncCallback = std::function<void(const SyncPayload&)>;
 using BeatCallback = std::function<void(float)>;
+using ConfigAppliedCallback = std::function<void(const DeviceConfig&)>;
 
 class Transport {
  public:
   void begin(const DeviceConfig& config, SyncCallback onSync, BeatCallback onBeat);
   void loop();
   void applyConfig(const DeviceConfig& config, bool runWifiPortal = false);
+  void setConfigAppliedCallback(ConfigAppliedCallback callback);
   void sendBpm(float bpm);
   void sendStartStop();
   void sendClickToggle();
@@ -42,6 +44,7 @@ class Transport {
   bool wifiPortalPending_ = false;
   SyncCallback onSync_;
   BeatCallback onBeat_;
+  ConfigAppliedCallback configAppliedCallback_;
   char host_[48] = "";
   uint16_t oscPort_ = 9000;
   uint16_t listenPort_ = 9001;
@@ -50,7 +53,9 @@ class Transport {
   uint32_t lastHelloMs_ = 0;
   uint32_t lastOscHelloMs_ = 0;
   uint32_t lastSyncMs_ = 0;
+  uint32_t lastBeatPulseMs_ = 0;
   bool wifiRxReady_ = false;
+  char connectedSsid_[33] = "";
   SyncPayload pendingSync_;
 
   void sendSerialLine(const char* line);
@@ -72,6 +77,9 @@ class Transport {
   void pollOsc();
   void dispatchLine(const char* line);
   void emitSync();
+  bool shouldAcceptSerialBeat() const;
+  bool shouldAcceptOscBeat() const;
+  void deliverBeat(float beat);
   static bool parseSyncLine(const char* line, SyncPayload* payload);
   static bool parseBeatLine(const char* line, float* beat);
 };

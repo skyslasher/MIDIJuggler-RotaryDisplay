@@ -72,12 +72,27 @@ void EncoderFsm::confirmLocalBpm(float bpm) {
   pendingLocalBpmMs_ = millis();
 }
 
+void EncoderFsm::clearExpiredPendingLocalBpm() {
+  if (pendingLocalBpm_ >= 0.0f &&
+      millis() - pendingLocalBpmMs_ >= kPendingLocalBpmTimeoutMs) {
+    pendingLocalBpm_ = -1.0f;
+  }
+}
+
+bool EncoderFsm::isBpmTransferPending() {
+  if (editing_) {
+    return true;
+  }
+  clearExpiredPendingLocalBpm();
+  return pendingLocalBpm_ >= 0.0f;
+}
+
 bool EncoderFsm::shouldRejectSyncBpm(float bpm) {
   if (pendingLocalBpm_ < 0.0f) {
     return false;
   }
-  if (millis() - pendingLocalBpmMs_ >= kPendingLocalBpmTimeoutMs) {
-    pendingLocalBpm_ = -1.0f;
+  clearExpiredPendingLocalBpm();
+  if (pendingLocalBpm_ < 0.0f) {
     return false;
   }
   if (fabsf(bpm - pendingLocalBpm_) <= kPendingLocalBpmTolerance) {

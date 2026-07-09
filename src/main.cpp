@@ -66,8 +66,16 @@ void onBeat(float beat) {
   gLeds.pulse(gUi.pulseEnabled, beat);
 }
 
+void onConfigApplied(const DeviceConfig& config) {
+  gUi.pulseEnabled = config.pulseEnabled;
+  gLeds.setBeatColor(config.beatLedR, config.beatLedG, config.beatLedB);
+}
+
 void handleTouchAction(int page, bool tap) {
   if (!tap || page != static_cast<int>(SettingsPage::Bpm)) {
+    return;
+  }
+  if (gEncoder.isBpmTransferPending()) {
     return;
   }
   gTransport.sendTapTempo();
@@ -111,10 +119,12 @@ void setup() {
   gEncoder.begin(40.0f, 240.0f, gConfig.bpmStep);
   Serial.println("init leds");
   gLeds.begin();
+  gLeds.setBeatColor(gConfig.beatLedR, gConfig.beatLedG, gConfig.beatLedB);
   Serial.println("init touch");
   gTouch.begin();
   Serial.println("init transport");
   gTransport.setConfigStore(&gConfigStore, &gConfig);
+  gTransport.setConfigAppliedCallback(onConfigApplied);
   gTransport.begin(gConfig, applySync, onBeat);
   updateNetworkStatus();
   gRenderDirty = true;
@@ -122,6 +132,8 @@ void setup() {
 }
 
 void loop() {
+  gTransport.loop();
+
   const int previousPage = gUi.settingsPage;
 
   const EncoderFsm::Result encoder = gEncoder.update(gUi.settingsPage);
@@ -182,7 +194,6 @@ void loop() {
     gRenderDirty = false;
   }
 
-  gTransport.loop();
   updateNetworkStatus();
 
   gLeds.tick();

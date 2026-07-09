@@ -24,6 +24,7 @@ class EncoderFsm {
   void cancelIntervalEdit();
   void confirmLocalBpm(float bpm);
   bool shouldRejectSyncBpm(float bpm);
+  bool isBpmTransferPending();
   bool isEditing() const { return editing_; }
   bool isEditingInterval() const { return editingInterval_; }
   Result update(int settingsPage = 0);
@@ -31,6 +32,7 @@ class EncoderFsm {
  private:
   void beginBpmEditIfNeeded();
   void beginIntervalEditIfNeeded();
+  void clearExpiredPendingLocalBpm();
   void consumePcnt(Result* result, int settingsPage);
 
   float bpmMin_ = 40.0f;
