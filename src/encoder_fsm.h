@@ -29,6 +29,8 @@ class EncoderFsm {
   Result update(int settingsPage = 0);
 
  private:
+  void beginBpmEditIfNeeded();
+  void beginIntervalEditIfNeeded();
   void consumePcnt(Result* result, int settingsPage);
 
   float bpmMin_ = 40.0f;

@@ -112,13 +112,43 @@ void EncoderFsm::cancelIntervalEdit() {
   strlcpy(editInterval_, confirmedInterval_, sizeof(editInterval_));
 }
 
+void EncoderFsm::beginBpmEditIfNeeded() {
+  if (editing_) {
+    return;
+  }
+  editing_ = true;
+  rotatedWhileEditing_ = true;
+  editStartedMs_ = millis();
+  editBpm_ = confirmedBpm_;
+}
+
+void EncoderFsm::beginIntervalEditIfNeeded() {
+  if (editingInterval_) {
+    return;
+  }
+  editingInterval_ = true;
+  rotatedWhileEditingInterval_ = true;
+  editStartedMs_ = millis();
+  strlcpy(editInterval_, confirmedInterval_, sizeof(editInterval_));
+}
+
 void EncoderFsm::consumePcnt(Result* result, int settingsPage) {
   int16_t count = 0;
   pcnt_get_counter_value(kPcntUnit, &count);
-  pcnt_counter_clear(kPcntUnit);
   if (count == 0) {
     return;
   }
+
+  if (settingsPage == static_cast<int>(SettingsPage::Bpm)) {
+    beginBpmEditIfNeeded();
+  } else if (settingsPage == static_cast<int>(SettingsPage::Interval)) {
+    beginIntervalEditIfNeeded();
+  } else {
+    pcnt_counter_clear(kPcntUnit);
+    return;
+  }
+
+  pcnt_counter_clear(kPcntUnit);
 
   pcntRemainder_ -= count;
   int steps = 0;
@@ -135,12 +165,6 @@ void EncoderFsm::consumePcnt(Result* result, int settingsPage) {
   }
 
   if (settingsPage == static_cast<int>(SettingsPage::Interval)) {
-    if (!editingInterval_) {
-      editingInterval_ = true;
-      rotatedWhileEditingInterval_ = true;
-      editStartedMs_ = millis();
-      strlcpy(editInterval_, confirmedInterval_, sizeof(editInterval_));
-    }
     editStartedMs_ = millis();
     const char* next = stepInterval(editInterval_, steps);
     strlcpy(editInterval_, next, sizeof(editInterval_));
@@ -149,16 +173,6 @@ void EncoderFsm::consumePcnt(Result* result, int settingsPage) {
     return;
   }
 
-  if (settingsPage != static_cast<int>(SettingsPage::Bpm)) {
-    return;
-  }
-
-  if (!editing_) {
-    editing_ = true;
-    rotatedWhileEditing_ = true;
-    editStartedMs_ = millis();
-    editBpm_ = confirmedBpm_;
-  }
   editStartedMs_ = millis();
   editBpm_ += steps * step_;
   if (editBpm_ < bpmMin_) editBpm_ = bpmMin_;
