@@ -24,7 +24,7 @@ void LedRing::pulse(bool enabled, float beatValue) {
     strip.setPixelColor(i, strip.Color(30, 255, 120));
   }
   strip.show();
-  offAtMs_ = millis() + 120;
+  offAtMs_ = millis() + 80;
 }
 
 void LedRing::tick() {

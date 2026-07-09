@@ -554,110 +554,122 @@ void Transport::pollSerial() {
 }
 
 void Transport::pollOsc() {
-  const int size = gRx.parsePacket();
-  if (size <= 0) {
-    return;
-  }
-  uint8_t buffer[192];
-  const int read = gRx.read(buffer, sizeof(buffer));
-  if (read <= 0) {
-    return;
-  }
-  char address[64] = {0};
-  memcpy(address, buffer, min(static_cast<size_t>(read), sizeof(address) - 1));
-  if (strcmp(address, kBeatAddress) == 0) {
-    const size_t offset = oscFirstArgOffset(buffer, address);
-    if (static_cast<size_t>(read) >= offset + sizeof(float)) {
-      const float beat = readFloatBE(buffer + offset);
-      if (onBeat_) {
-        onBeat_(beat);
-      }
-    }
-    return;
-  }
-  if (strcmp(address, kFeedbackBpmAddress) == 0) {
-    const size_t offset = oscFirstArgOffset(buffer, address);
-    if (static_cast<size_t>(read) >= offset + sizeof(float)) {
-      pendingSync_.bpm = readFloatBE(buffer + offset);
-      emitSync();
-    }
-    return;
-  }
-  if (strcmp(address, kFeedbackRunningAddress) == 0) {
-    const size_t offset = oscFirstArgOffset(buffer, address);
-    if (static_cast<size_t>(read) >= offset + sizeof(int32_t)) {
-      pendingSync_.running = readI32BE(buffer + offset) != 0;
-      emitSync();
-    }
-    return;
-  }
-  if (strcmp(address, kFeedbackClickEnabledAddress) == 0) {
-    const size_t offset = oscFirstArgOffset(buffer, address);
-    if (static_cast<size_t>(read) >= offset + sizeof(int32_t)) {
-      pendingSync_.clickEnabled = readI32BE(buffer + offset) != 0;
-      emitSync();
-    }
-    return;
-  }
-  if (strcmp(address, kFeedbackClickIntervalAddress) == 0) {
-    const char* tags = oscTags(buffer, address);
-    if (tags[1] != 's') {
+  while (true) {
+    const int size = gRx.parsePacket();
+    if (size <= 0) {
       return;
     }
-    const size_t offset = oscFirstArgOffset(buffer, address);
-    if (offset < static_cast<size_t>(read)) {
-      strlcpy(pendingSync_.clickInterval, reinterpret_cast<const char*>(buffer + offset),
-              sizeof(pendingSync_.clickInterval));
-      emitSync();
+    uint8_t buffer[192];
+    const int read = gRx.read(buffer, sizeof(buffer));
+    if (read <= 0) {
+      continue;
     }
-    return;
-  }
-  if (strcmp(address, kSyncAddress) != 0) {
-    return;
-  }
-  const char* tags = oscTags(buffer, address);
-  size_t offset = oscFirstArgOffset(buffer, address);
-  SyncPayload payload;
-  int intArgIndex = 0;
-  for (size_t i = 1; tags[i] != '\0'; ++i) {
-    switch (tags[i]) {
-      case 'f':
-        if (static_cast<size_t>(read) < offset + sizeof(float)) {
-          return;
+    char address[64] = {0};
+    memcpy(address, buffer, min(static_cast<size_t>(read), sizeof(address) - 1));
+    if (strcmp(address, kBeatAddress) == 0) {
+      const size_t offset = oscFirstArgOffset(buffer, address);
+      if (static_cast<size_t>(read) >= offset + sizeof(float)) {
+        const float beat = readFloatBE(buffer + offset);
+        if (onBeat_) {
+          onBeat_(beat);
         }
-        payload.bpm = readFloatBE(buffer + offset);
-        offset += sizeof(float);
-        break;
-      case 'i': {
-        if (static_cast<size_t>(read) < offset + sizeof(int32_t)) {
-          return;
+      }
+      continue;
+    }
+    if (strcmp(address, kFeedbackBpmAddress) == 0) {
+      const size_t offset = oscFirstArgOffset(buffer, address);
+      if (static_cast<size_t>(read) >= offset + sizeof(float)) {
+        pendingSync_.bpm = readFloatBE(buffer + offset);
+        emitSync();
+      }
+      continue;
+    }
+    if (strcmp(address, kFeedbackRunningAddress) == 0) {
+      const size_t offset = oscFirstArgOffset(buffer, address);
+      if (static_cast<size_t>(read) >= offset + sizeof(int32_t)) {
+        pendingSync_.running = readI32BE(buffer + offset) != 0;
+        emitSync();
+      }
+      continue;
+    }
+    if (strcmp(address, kFeedbackClickEnabledAddress) == 0) {
+      const size_t offset = oscFirstArgOffset(buffer, address);
+      if (static_cast<size_t>(read) >= offset + sizeof(int32_t)) {
+        pendingSync_.clickEnabled = readI32BE(buffer + offset) != 0;
+        emitSync();
+      }
+      continue;
+    }
+    if (strcmp(address, kFeedbackClickIntervalAddress) == 0) {
+      const char* tags = oscTags(buffer, address);
+      if (tags[1] != 's') {
+        continue;
+      }
+      const size_t offset = oscFirstArgOffset(buffer, address);
+      if (offset < static_cast<size_t>(read)) {
+        strlcpy(pendingSync_.clickInterval, reinterpret_cast<const char*>(buffer + offset),
+                sizeof(pendingSync_.clickInterval));
+        emitSync();
+      }
+      continue;
+    }
+    if (strcmp(address, kSyncAddress) != 0) {
+      continue;
+    }
+    const char* tags = oscTags(buffer, address);
+    size_t offset = oscFirstArgOffset(buffer, address);
+    SyncPayload payload;
+    int intArgIndex = 0;
+    bool valid = true;
+    for (size_t i = 1; tags[i] != '\0'; ++i) {
+      switch (tags[i]) {
+        case 'f':
+          if (static_cast<size_t>(read) < offset + sizeof(float)) {
+            valid = false;
+          } else {
+            payload.bpm = readFloatBE(buffer + offset);
+            offset += sizeof(float);
+          }
+          break;
+        case 'i': {
+          if (static_cast<size_t>(read) < offset + sizeof(int32_t)) {
+            valid = false;
+          } else {
+            const int32_t value = readI32BE(buffer + offset);
+            offset += sizeof(int32_t);
+            if (intArgIndex == 0) {
+              payload.running = value != 0;
+            } else {
+              payload.clickEnabled = value != 0;
+            }
+            ++intArgIndex;
+          }
+          break;
         }
-        const int32_t value = readI32BE(buffer + offset);
-        offset += sizeof(int32_t);
-        if (intArgIndex == 0) {
-          payload.running = value != 0;
-        } else {
-          payload.clickEnabled = value != 0;
-        }
-        ++intArgIndex;
+        case 's':
+          if (offset >= static_cast<size_t>(read)) {
+            valid = false;
+          } else {
+            strlcpy(payload.clickInterval, reinterpret_cast<const char*>(buffer + offset),
+                    sizeof(payload.clickInterval));
+            offset += pad4(strlen(reinterpret_cast<const char*>(buffer + offset)) + 1);
+          }
+          break;
+        default:
+          valid = false;
+          break;
+      }
+      if (!valid) {
         break;
       }
-      case 's':
-        if (offset >= static_cast<size_t>(read)) {
-          return;
-        }
-        strlcpy(payload.clickInterval, reinterpret_cast<const char*>(buffer + offset),
-                sizeof(payload.clickInterval));
-        offset += pad4(strlen(reinterpret_cast<const char*>(buffer + offset)) + 1);
-        break;
-      default:
-        return;
     }
-  }
-  pendingSync_ = payload;
-  if (onSync_) {
-    lastSyncMs_ = millis();
-    onSync_(payload);
+    if (valid) {
+      pendingSync_ = payload;
+      if (onSync_) {
+        lastSyncMs_ = millis();
+        onSync_(payload);
+      }
+    }
   }
 }
 
