@@ -23,7 +23,6 @@ class EncoderFsm {
   void onSyncInterval(const char* interval);
   void cancelIntervalEdit();
   void confirmLocalBpm(float bpm);
-  void onTransportToggle();
   bool shouldRejectSyncBpm(float bpm);
   bool isBpmTransferPending();
   bool isEditing() const { return editing_; }

@@ -159,7 +159,6 @@ void loop() {
     markDirty();
   }
   if (encoder.toggleTransport) {
-    gEncoder.onTransportToggle();
     gTransport.sendStartStop();
   }
   if (encoder.toggleClick) {

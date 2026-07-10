@@ -74,10 +74,6 @@ void EncoderFsm::confirmLocalBpm(float bpm) {
   tapTempoBlockedUntilMs_ = millis() + kTapTempoBlockAfterConfirmMs;
 }
 
-void EncoderFsm::onTransportToggle() {
-  tapTempoBlockedUntilMs_ = millis() + kTapTempoBlockAfterConfirmMs;
-}
-
 void EncoderFsm::clearExpiredPendingLocalBpm() {
   if (pendingLocalBpm_ >= 0.0f &&
       millis() - pendingLocalBpmMs_ >= kPendingLocalBpmTimeoutMs) {
