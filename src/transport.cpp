@@ -169,7 +169,8 @@ void Transport::applyConfig(const DeviceConfig& config, bool runWifiPortal) {
   const bool transportChanged = wasSerialClock != useSerialClock_ || wasWifiClock != useWifiClock_;
   if (transportChanged) {
     // Force OSC hello after serial->wifi switches; stale serial sync masked registration.
-    lastSyncMs_ = 0;
+    hostSyncReceived_ = false;
+    lastHostSyncMs_ = 0;
     lastHelloMs_ = millis();
     lastOscHelloMs_ = millis();
     sendHello();
@@ -209,7 +210,7 @@ void Transport::loop() {
   }
   if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
     pollOsc();
-    if (!isOscConnected()) {
+    if (needsOscHello()) {
       const uint32_t now = millis();
       if (now - lastOscHelloMs_ >= 3000) {
         lastOscHelloMs_ = now;
@@ -309,10 +310,25 @@ bool Transport::isOscConnected() const {
   if (!isWifiConnected()) {
     return false;
   }
-  if (lastSyncMs_ == 0) {
+  if (!hostSyncReceived_ || lastHostSyncMs_ == 0) {
     return false;
   }
-  return millis() - lastSyncMs_ < 10000;
+  return millis() - lastHostSyncMs_ < 10000;
+}
+
+void Transport::markHostSyncReceived() {
+  hostSyncReceived_ = true;
+  lastHostSyncMs_ = millis();
+}
+
+bool Transport::needsOscHello() const {
+  if (!useWifiClock_ || WiFi.status() != WL_CONNECTED) {
+    return false;
+  }
+  if (!hostSyncReceived_) {
+    return true;
+  }
+  return millis() - lastHostSyncMs_ >= 10000;
 }
 
 void Transport::sendSerialLine(const char* line) {
@@ -584,7 +600,6 @@ void Transport::emitSync() {
   if (!onSync_) {
     return;
   }
-  lastSyncMs_ = millis();
   onSync_(pendingSync_);
 }
 
@@ -717,8 +732,8 @@ void Transport::pollOsc() {
     }
     if (valid) {
       pendingSync_ = payload;
+      markHostSyncReceived();
       if (onSync_) {
-        lastSyncMs_ = millis();
         onSync_(payload);
       }
     }
@@ -766,7 +781,7 @@ void Transport::dispatchLine(const char* line) {
   float beat = 0.0f;
   if (parseSyncLine(line, &payload)) {
     pendingSync_ = payload;
-    lastSyncMs_ = millis();
+    markHostSyncReceived();
     if (onSync_) {
       onSync_(payload);
     }

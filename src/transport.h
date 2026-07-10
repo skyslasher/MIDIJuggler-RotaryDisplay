@@ -52,7 +52,8 @@ class Transport {
   size_t serialLength_ = 0;
   uint32_t lastHelloMs_ = 0;
   uint32_t lastOscHelloMs_ = 0;
-  uint32_t lastSyncMs_ = 0;
+  uint32_t lastHostSyncMs_ = 0;
+  bool hostSyncReceived_ = false;
   uint32_t lastBeatPulseMs_ = 0;
   bool wifiRxReady_ = false;
   char connectedSsid_[33] = "";
@@ -77,6 +78,8 @@ class Transport {
   void pollOsc();
   void dispatchLine(const char* line);
   void emitSync();
+  void markHostSyncReceived();
+  bool needsOscHello() const;
   bool shouldAcceptSerialBeat() const;
   bool shouldAcceptOscBeat() const;
   void deliverBeat(float beat);
