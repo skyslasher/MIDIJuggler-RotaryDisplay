@@ -93,9 +93,6 @@ bool EncoderFsm::isBpmTransferPending() {
 }
 
 bool EncoderFsm::shouldRejectSyncBpm(float bpm) {
-  if (pendingLocalBpm_ < 0.0f) {
-    return false;
-  }
   clearExpiredPendingLocalBpm();
   if (pendingLocalBpm_ < 0.0f) {
     return false;
@@ -104,7 +101,13 @@ bool EncoderFsm::shouldRejectSyncBpm(float bpm) {
     pendingLocalBpm_ = -1.0f;
     return false;
   }
-  return true;
+  if (fabsf(bpm - confirmedBpm_) <= kPendingLocalBpmTolerance) {
+    // Stale host sync from before the local edit was confirmed.
+    return true;
+  }
+  // Host-authoritative BPM (web UI, MIDI clock, BandHelper, tap tempo).
+  pendingLocalBpm_ = -1.0f;
+  return false;
 }
 
 void EncoderFsm::onSyncBpm(float bpm) {
