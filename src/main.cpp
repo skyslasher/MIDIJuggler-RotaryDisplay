@@ -82,13 +82,13 @@ void handleTouchAction(int page, bool tap) {
     return;
   }
 
-  // Require multiple screen taps before sending tap_tempo. A single touch
-  // (including spurious touch events from encoder button presses) must not
-  // register tempo; only deliberate multi-tap input sends tap_tempo.
+  // Require three screen taps before sending tap_tempo. Single or double
+  // touches (including spurious touch events from encoder button presses)
+  // must not register tempo; only deliberate triple-tap input sends tap_tempo.
   static uint8_t tapTempoCount = 0;
   static uint32_t lastTapTempoMs = 0;
   constexpr uint32_t kTapTempoWindowMs = 2500;
-  constexpr uint8_t kTapTempoMinTaps = 2;
+  constexpr uint8_t kTapTempoMinTaps = 3;
 
   const uint32_t now = millis();
   if (tapTempoCount > 0 && now - lastTapTempoMs > kTapTempoWindowMs) {
