@@ -11,6 +11,7 @@ namespace {
 constexpr uint32_t kEditTimeoutMs = 5000;
 constexpr uint32_t kPendingLocalBpmTimeoutMs = 3000;
 constexpr uint32_t kTapTempoBlockAfterConfirmMs = 3000;
+constexpr uint32_t kTouchBlockAfterEncoderMs = 500;
 constexpr float kPendingLocalBpmTolerance = 0.05f;
 constexpr pcnt_unit_t kPcntUnit = PCNT_UNIT_0;
 constexpr int kPulsesPerDetent = 2;
@@ -94,6 +95,14 @@ bool EncoderFsm::isBpmTransferPending() {
 
 bool EncoderFsm::isSwitchPressed() const {
   return digitalRead(board::kEncoderSwitch) == LOW;
+}
+
+bool EncoderFsm::isTouchBlockedAfterEncoder() const {
+  return touchBlockedUntilMs_ != 0 && millis() < touchBlockedUntilMs_;
+}
+
+bool EncoderFsm::wasTransportToggledRecently(uint32_t windowMs) const {
+  return transportToggledAtMs_ != 0 && millis() - transportToggledAtMs_ < windowMs;
 }
 
 bool EncoderFsm::shouldRejectSyncBpm(float bpm) {
@@ -214,7 +223,16 @@ EncoderFsm::Result EncoderFsm::update(int settingsPage) {
 
   const uint8_t switchState = digitalRead(board::kEncoderSwitch);
   const bool switchPressed = lastSwitch == HIGH && switchState == LOW;
+  const bool switchReleased = lastSwitch == LOW && switchState == HIGH;
+  if (switchPressed) {
+    result.encoderButtonPressed = true;
+  }
+  if (switchReleased) {
+    result.encoderButtonReleased = true;
+    touchBlockedUntilMs_ = millis() + kTouchBlockAfterEncoderMs;
+  }
   if (switchPressed || switchState == LOW) {
+    touchBlockedUntilMs_ = millis() + kTouchBlockAfterEncoderMs;
     int16_t junk = 0;
     pcnt_get_counter_value(kPcntUnit, &junk);
     pcnt_counter_clear(kPcntUnit);
@@ -236,6 +254,7 @@ EncoderFsm::Result EncoderFsm::update(int settingsPage) {
           result.newBpm = confirmedBpm_;
         } else if (!rotatedWhileEditing_) {
           result.toggleTransport = true;
+          transportToggledAtMs_ = millis();
         }
         break;
       case SettingsPage::Click:

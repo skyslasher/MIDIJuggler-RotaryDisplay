@@ -22,6 +22,17 @@ bool gRenderDirty = true;
 
 void markDirty() { gRenderDirty = true; }
 
+uint8_t gTapTempoCount = 0;
+uint32_t gLastTapMs = 0;
+uint32_t gLastSentTapTempoMs = 0;
+bool gTapTempoArmed = false;
+
+void resetTapTempoArming() {
+  gTapTempoCount = 0;
+  gLastTapMs = 0;
+  gTapTempoArmed = false;
+}
+
 void updateNetworkStatus() {
   const bool wifiConnected = gTransport.isWifiConnected();
   const char* ssid = gTransport.wifiSsid();
@@ -83,44 +94,39 @@ void handleTouchAction(int page, bool tap) {
   }
 
   // Ignore spurious capacitive touches caused by pressing the encoder button.
-  if (gEncoder.isSwitchPressed()) {
+  if (gEncoder.isSwitchPressed() || gEncoder.isTouchBlockedAfterEncoder()) {
     return;
   }
 
   // Require three screen taps to arm tap tempo. Single or double touches must
   // not register tempo. Once armed, each deliberate tap sends one tap_tempo
   // (matching GamePi) until the window expires.
-  static uint8_t tapTempoCount = 0;
-  static uint32_t lastTapMs = 0;
-  static uint32_t lastSentTapTempoMs = 0;
-  static bool tapTempoArmed = false;
   constexpr uint32_t kTapTempoWindowMs = 2500;
   constexpr uint32_t kTapTempoMinIntervalMs = 150;
   constexpr uint8_t kTapTempoMinTaps = 3;
 
   const uint32_t now = millis();
-  if (lastTapMs > 0 && now - lastTapMs > kTapTempoWindowMs) {
-    tapTempoCount = 0;
-    tapTempoArmed = false;
+  if (gLastTapMs > 0 && now - gLastTapMs > kTapTempoWindowMs) {
+    resetTapTempoArming();
   }
-  lastTapMs = now;
+  gLastTapMs = now;
 
-  if (tapTempoArmed) {
-    if (lastSentTapTempoMs > 0 && now - lastSentTapTempoMs < kTapTempoMinIntervalMs) {
+  if (gTapTempoArmed) {
+    if (gLastSentTapTempoMs > 0 && now - gLastSentTapTempoMs < kTapTempoMinIntervalMs) {
       return;
     }
-    lastSentTapTempoMs = now;
+    gLastSentTapTempoMs = now;
     gTransport.sendTapTempo();
     return;
   }
 
-  ++tapTempoCount;
-  if (tapTempoCount < kTapTempoMinTaps) {
+  ++gTapTempoCount;
+  if (gTapTempoCount < kTapTempoMinTaps) {
     return;
   }
-  tapTempoArmed = true;
-  tapTempoCount = 0;
-  lastSentTapTempoMs = now;
+  gTapTempoArmed = true;
+  gTapTempoCount = 0;
+  gLastSentTapTempoMs = now;
   gTransport.sendTapTempo();
 }
 
@@ -182,6 +188,11 @@ void loop() {
   const EncoderFsm::Result encoder = gEncoder.update(gUi.settingsPage);
   gUi.editing = gEncoder.isEditing();
   gUi.editingInterval = gEncoder.isEditingInterval();
+
+  if (encoder.encoderButtonPressed || encoder.encoderButtonReleased ||
+      encoder.toggleTransport) {
+    resetTapTempoArming();
+  }
 
   if (encoder.bpmChanged) {
     gUi.displayedBpm = encoder.newBpm;

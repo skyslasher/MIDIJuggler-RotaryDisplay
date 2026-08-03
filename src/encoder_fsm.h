@@ -14,6 +14,8 @@ class EncoderFsm {
     bool intervalChanged = false;
     bool confirmInterval = false;
     bool cancelInterval = false;
+    bool encoderButtonPressed = false;
+    bool encoderButtonReleased = false;
     float newBpm = 0.0f;
     char newInterval[16] = "";
   };
@@ -26,6 +28,8 @@ class EncoderFsm {
   bool shouldRejectSyncBpm(float bpm);
   bool isBpmTransferPending();
   bool isSwitchPressed() const;
+  bool isTouchBlockedAfterEncoder() const;
+  bool wasTransportToggledRecently(uint32_t windowMs = 500) const;
   bool isEditing() const { return editing_; }
   bool isEditingInterval() const { return editingInterval_; }
   Result update(int settingsPage = 0);
@@ -52,4 +56,6 @@ class EncoderFsm {
   float pendingLocalBpm_ = -1.0f;
   uint32_t pendingLocalBpmMs_ = 0;
   uint32_t tapTempoBlockedUntilMs_ = 0;
+  uint32_t touchBlockedUntilMs_ = 0;
+  uint32_t transportToggledAtMs_ = 0;
 };
