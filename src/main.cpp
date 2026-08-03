@@ -81,6 +81,24 @@ void handleTouchAction(int page, bool tap) {
   if (gEncoder.isBpmTransferPending()) {
     return;
   }
+
+  // Require multiple screen taps before sending tap_tempo. A single touch
+  // (including spurious touch events from encoder button presses) must not
+  // register tempo; only deliberate multi-tap input sends tap_tempo.
+  static uint8_t tapTempoCount = 0;
+  static uint32_t lastTapTempoMs = 0;
+  constexpr uint32_t kTapTempoWindowMs = 2500;
+  constexpr uint8_t kTapTempoMinTaps = 2;
+
+  const uint32_t now = millis();
+  if (tapTempoCount > 0 && now - lastTapTempoMs > kTapTempoWindowMs) {
+    tapTempoCount = 0;
+  }
+  lastTapTempoMs = now;
+  ++tapTempoCount;
+  if (tapTempoCount < kTapTempoMinTaps) {
+    return;
+  }
   gTransport.sendTapTempo();
 }
 

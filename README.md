@@ -130,7 +130,7 @@ On boot a splash screen is shown for 2 seconds.
 - **Rotate** encoder on BPM page: edit BPM, confirm with press or revert after 5 s
 - **Press** without rotation on BPM page: start/stop transport
 - **Swipe** left/right: change page (wraps around)
-- **Tap** on BPM page: tap tempo
+- **Multi-tap** on BPM page (2+ taps within 2.5 s): tap tempo (single tap does nothing)
 - **Press** on Klick/Puls pages: toggle setting
 - **Rotate** on Intervall page: edit interval with 5 s confirm/revert
 
