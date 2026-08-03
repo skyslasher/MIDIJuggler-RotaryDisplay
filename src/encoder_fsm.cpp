@@ -92,6 +92,10 @@ bool EncoderFsm::isBpmTransferPending() {
   return pendingLocalBpm_ >= 0.0f;
 }
 
+bool EncoderFsm::isSwitchPressed() const {
+  return digitalRead(board::kEncoderSwitch) == LOW;
+}
+
 bool EncoderFsm::shouldRejectSyncBpm(float bpm) {
   clearExpiredPendingLocalBpm();
   if (pendingLocalBpm_ < 0.0f) {

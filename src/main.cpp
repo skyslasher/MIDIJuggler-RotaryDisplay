@@ -82,23 +82,45 @@ void handleTouchAction(int page, bool tap) {
     return;
   }
 
-  // Require three screen taps before sending tap_tempo. Single or double
-  // touches (including spurious touch events from encoder button presses)
-  // must not register tempo; only deliberate triple-tap input sends tap_tempo.
+  // Ignore spurious capacitive touches caused by pressing the encoder button.
+  if (gEncoder.isSwitchPressed()) {
+    return;
+  }
+
+  // Require three screen taps to arm tap tempo. Single or double touches must
+  // not register tempo. Once armed, each deliberate tap sends one tap_tempo
+  // (matching GamePi) until the window expires.
   static uint8_t tapTempoCount = 0;
-  static uint32_t lastTapTempoMs = 0;
+  static uint32_t lastTapMs = 0;
+  static uint32_t lastSentTapTempoMs = 0;
+  static bool tapTempoArmed = false;
   constexpr uint32_t kTapTempoWindowMs = 2500;
+  constexpr uint32_t kTapTempoMinIntervalMs = 150;
   constexpr uint8_t kTapTempoMinTaps = 3;
 
   const uint32_t now = millis();
-  if (tapTempoCount > 0 && now - lastTapTempoMs > kTapTempoWindowMs) {
+  if (lastTapMs > 0 && now - lastTapMs > kTapTempoWindowMs) {
     tapTempoCount = 0;
+    tapTempoArmed = false;
   }
-  lastTapTempoMs = now;
+  lastTapMs = now;
+
+  if (tapTempoArmed) {
+    if (lastSentTapTempoMs > 0 && now - lastSentTapTempoMs < kTapTempoMinIntervalMs) {
+      return;
+    }
+    lastSentTapTempoMs = now;
+    gTransport.sendTapTempo();
+    return;
+  }
+
   ++tapTempoCount;
   if (tapTempoCount < kTapTempoMinTaps) {
     return;
   }
+  tapTempoArmed = true;
+  tapTempoCount = 0;
+  lastSentTapTempoMs = now;
   gTransport.sendTapTempo();
 }
 

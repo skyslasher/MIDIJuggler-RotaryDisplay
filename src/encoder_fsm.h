@@ -25,6 +25,7 @@ class EncoderFsm {
   void confirmLocalBpm(float bpm);
   bool shouldRejectSyncBpm(float bpm);
   bool isBpmTransferPending();
+  bool isSwitchPressed() const;
   bool isEditing() const { return editing_; }
   bool isEditingInterval() const { return editingInterval_; }
   Result update(int settingsPage = 0);
