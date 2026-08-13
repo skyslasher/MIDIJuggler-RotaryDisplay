@@ -3,7 +3,34 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PORT="${ROTARY_UPLOAD_PORT:-/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_14:C1:9F:26:72:48-if00}"
+
+# Port resolution: CLI arg > ROTARY_UPLOAD_PORT > platformio.ini default (encoder 1).
+# platformio.ini [env:pi-both] also sets upload_port; --upload-port below overrides it.
+if [[ $# -ge 1 ]]; then
+  PORT="$1"
+elif [[ -n "${ROTARY_UPLOAD_PORT:-}" ]]; then
+  PORT="$ROTARY_UPLOAD_PORT"
+else
+  PORT="/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_14:C1:9F:26:72:48-if00"
+fi
+
+if [[ -z "$PORT" ]]; then
+  echo "ERROR: No upload port specified."
+  echo "Usage: $0 [/dev/ttyACM0|/dev/serial/by-id/...]"
+  echo "Or set ROTARY_UPLOAD_PORT."
+  echo ""
+  echo "Available devices (pio device list):"
+  pio device list 2>/dev/null || echo "  (pio not in PATH — plug in device and check /dev/ttyACM* or /dev/serial/by-id/)"
+  exit 1
+fi
+
+echo "Upload port: $PORT"
+if [[ ! -e "$PORT" ]]; then
+  echo "WARNING: $PORT not found."
+  echo "Available devices (pio device list):"
+  pio device list 2>/dev/null || true
+  exit 1
+fi
 
 echo "Stopping midijuggler..."
 sudo systemctl stop midijuggler 2>/dev/null || true
@@ -46,10 +73,10 @@ if [[ -f include/RotaryUi.h ]] && command -v node >/dev/null 2>&1; then
   node scripts/verify-rotary-ui.mjs include/RotaryUi.h
 fi
 
-echo "Uploading firmware (env pi-both)..."
+echo "Uploading firmware (env pi-both) to $PORT..."
 # display_ui.cpp #ifdefs depend on RotaryUi.h; force recompile after header export/patch.
 rm -f .pio/build/pi-both/src/display_ui.cpp.o
-pio run -e pi-both -t upload
+pio run -e pi-both -t upload --upload-port "$PORT"
 
 echo "Starting midijuggler..."
 sudo systemctl start midijuggler 2>/dev/null || true
