@@ -43,6 +43,19 @@ Or use the helper script (same steps, frees the serial port automatically):
 ./scripts/flash-pi.sh
 ```
 
+**Two encoders on the Pi:** list by-id ports, then flash each board explicitly:
+
+```bash
+./scripts/flash-pi.sh -l
+./scripts/flash-pi.sh /dev/serial/by-id/usb-Espressif_...encoder1...-if00
+./scripts/flash-pi.sh /dev/serial/by-id/usb-Espressif_...encoder2...-if00
+```
+
+With no argument, the script auto-selects when exactly one Espressif port is
+connected; with two or more it exits until you pass the target port. Direct
+`pio run` must also pass `--upload-port` for encoder 2 — do not rely on
+`board_upload.wait_for_upload_port` (disabled in `pi-both` / `pi-serial).
+
 `pi-both` is the production Pi build: USB serial for clock/config plus WiFi/OSC using
 NVS-stored settings. Use `pi-serial` only when WiFi must be disabled at compile time.
 
@@ -55,9 +68,9 @@ sudo systemctl stop midijuggler
 pio run -e pi-both -t upload --upload-speed 115200
 ```
 
-The `pi-both` environment sets `upload_port` / `monitor_port` in
-`platformio.ini` at the repo root. Adjust the by-id path there if your
-device ID differs (`ls /dev/serial/by-id/`).
+The `pi-both` environment sets default `upload_port` / `monitor_port` in
+`platformio.ini` for encoder 1. Adjust the by-id path there if your device ID
+differs (`ls /dev/serial/by-id/` or `./scripts/flash-pi.sh -l`).
 
 For **WiFi/OSC** (opens a setup hotspot `RotaryDisplay-Setup` on first boot):
 
