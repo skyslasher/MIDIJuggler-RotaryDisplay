@@ -43,7 +43,7 @@ Or use the helper script (same steps, frees the serial port automatically):
 ./scripts/flash-pi.sh
 ```
 
-**Two encoders on the Pi:** list by-id ports, then flash each board explicitly:
+**Two encoders on the Pi:** list by-id ports (with adapter serial), then flash each board explicitly:
 
 ```bash
 ./scripts/flash-pi.sh -l
@@ -52,9 +52,15 @@ Or use the helper script (same steps, frees the serial port automatically):
 ```
 
 With no argument, the script auto-selects when exactly one Espressif port is
-connected; with two or more it exits until you pass the target port. Direct
-`pio run` must also pass `--upload-port` for encoder 2 — do not rely on
-`board_upload.wait_for_upload_port` (disabled in `pi-both` / `pi-serial).
+connected; with two or more it exits until you pass the target port.
+
+`pi-both` uses `upload_protocol = esp-builtin` (OpenOCD over USB-JTAG). That
+protocol **ignores** `upload_port` and `--upload-port`; OpenOCD picks the first
+USB-JTAG adapter unless pinned with `upload_flags = adapter serial …`.
+`./scripts/flash-pi.sh` extracts the serial from the by-id path, verifies the
+device with `esptool chip_id` before/after upload, and passes the correct
+`upload_flags`. Direct `pio run -e pi-both -t upload` only targets encoder 1
+(the default `upload_flags` in `platformio.ini`).
 
 `pi-both` is the production Pi build: USB serial for clock/config plus WiFi/OSC using
 NVS-stored settings. Use `pi-serial` only when WiFi must be disabled at compile time.
@@ -68,9 +74,9 @@ sudo systemctl stop midijuggler
 pio run -e pi-both -t upload --upload-speed 115200
 ```
 
-The `pi-both` environment sets default `upload_port` / `monitor_port` in
-`platformio.ini` for encoder 1. Adjust the by-id path there if your device ID
-differs (`ls /dev/serial/by-id/` or `./scripts/flash-pi.sh -l`).
+The `pi-both` environment sets default `upload_port` / `monitor_port` and
+`upload_flags` (adapter serial) in `platformio.ini` for encoder 1. Adjust the
+by-id path and serial if your device ID differs (`./scripts/flash-pi.sh -l`).
 
 For **WiFi/OSC** (opens a setup hotspot `RotaryDisplay-Setup` on first boot):
 
