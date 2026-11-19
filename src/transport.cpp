@@ -73,13 +73,15 @@ size_t oscFirstArgOffset(const uint8_t* buffer, const char* address) {
   return oscTagsOffset(address) + pad4(strlen(tags) + 1);
 }
 
-void sendOscPacket(const char* host, uint16_t port, const uint8_t* data, size_t length) {
-  gTx.beginPacket(host, port);
+void sendOscPacket(const IPAddress& ip, uint16_t port, const uint8_t* data, size_t length) {
+  if (!gTx.beginPacket(ip, port)) {
+    return;
+  }
   gTx.write(data, length);
   gTx.endPacket();
 }
 
-void sendOscFloat(const char* host, uint16_t port, const char* address, float value) {
+void sendOscFloat(const IPAddress& ip, uint16_t port, const char* address, float value) {
   uint8_t packet[96] = {0};
   size_t offset = 0;
   const size_t addrLen = pad4(strlen(address) + 1);
@@ -90,10 +92,10 @@ void sendOscFloat(const char* host, uint16_t port, const char* address, float va
   offset += pad4(3);
   writeFloatBE(packet + offset, value);
   offset += sizeof(value);
-  sendOscPacket(host, port, packet, offset);
+  sendOscPacket(ip, port, packet, offset);
 }
 
-void sendOscString(const char* host, uint16_t port, const char* address, const char* value) {
+void sendOscString(const IPAddress& ip, uint16_t port, const char* address, const char* value) {
   uint8_t packet[128] = {0};
   size_t offset = 0;
   const size_t addrLen = pad4(strlen(address) + 1);
@@ -105,10 +107,11 @@ void sendOscString(const char* host, uint16_t port, const char* address, const c
   const size_t valueLen = pad4(strlen(value) + 1);
   memcpy(packet + offset, value, strlen(value) + 1);
   offset += valueLen;
-  sendOscPacket(host, port, packet, offset);
+  sendOscPacket(ip, port, packet, offset);
 }
 
-void sendOscHelloPacket(const char* host, uint16_t port, const char* ip, uint16_t listenPort) {
+void sendOscHelloPacket(const IPAddress& ip, uint16_t port, const char* feedbackHost,
+                        uint16_t listenPort) {
   uint8_t packet[128] = {0};
   size_t offset = 0;
   const size_t addrLen = pad4(strlen(kHelloAddress) + 1);
@@ -117,15 +120,15 @@ void sendOscHelloPacket(const char* host, uint16_t port, const char* ip, uint16_
   const char* tags = ",si";
   memcpy(packet + offset, tags, 4);
   offset += pad4(4);
-  const size_t ipLen = pad4(strlen(ip) + 1);
-  memcpy(packet + offset, ip, strlen(ip) + 1);
+  const size_t ipLen = pad4(strlen(feedbackHost) + 1);
+  memcpy(packet + offset, feedbackHost, strlen(feedbackHost) + 1);
   offset += ipLen;
   writeI32BE(packet + offset, static_cast<int32_t>(listenPort));
   offset += sizeof(int32_t);
-  sendOscPacket(host, port, packet, offset);
+  sendOscPacket(ip, port, packet, offset);
 }
 
-void sendOscTrigger(const char* host, uint16_t port, const char* address) {
+void sendOscTrigger(const IPAddress& ip, uint16_t port, const char* address) {
   uint8_t packet[64] = {0};
   size_t offset = 0;
   const size_t addrLen = pad4(strlen(address) + 1);
@@ -136,7 +139,7 @@ void sendOscTrigger(const char* host, uint16_t port, const char* address) {
   offset += pad4(3);
   writeI32BE(packet + offset, 1);
   offset += sizeof(int32_t);
-  sendOscPacket(host, port, packet, offset);
+  sendOscPacket(ip, port, packet, offset);
 }
 
 }  // namespace
@@ -153,12 +156,18 @@ void Transport::setConfigAppliedCallback(ConfigAppliedCallback callback) {
 void Transport::applyConfig(const DeviceConfig& config, bool runWifiPortal) {
   const bool wasSerialClock = useSerialClock_;
   const bool wasWifiClock = useWifiClock_;
+  const bool hostChanged =
+      strncmp(host_, config.host, sizeof(host_)) != 0 || oscPort_ != config.oscPort;
   strlcpy(host_, config.host, sizeof(host_));
   oscPort_ = config.oscPort;
   listenPort_ = config.listenPort;
   useSerialClock_ = config.transport != TransportMode::Wifi;
   useWifiClock_ = config.transport != TransportMode::Serial;
   wifiEnabled_ = config.wifiEnabled;
+  if (hostChanged) {
+    hostIpValid_ = false;
+    lastHostResolveMs_ = 0;
+  }
 
   if (useWifiClock_ && wifiEnabled_) {
     connectWifi(config, runWifiPortal);
@@ -167,10 +176,10 @@ void Transport::applyConfig(const DeviceConfig& config, bool runWifiPortal) {
   }
 
   const bool transportChanged = wasSerialClock != useSerialClock_ || wasWifiClock != useWifiClock_;
-  if (transportChanged) {
-    // Force OSC hello after serial->wifi switches; stale serial sync masked registration.
-    hostSyncReceived_ = false;
-    lastHostSyncMs_ = 0;
+  if (transportChanged || hostChanged) {
+    // Serial sync must not count as OSC registration. Re-hello when the path changes.
+    oscSyncReceived_ = false;
+    lastOscSyncMs_ = 0;
     lastHelloMs_ = millis();
     lastOscHelloMs_ = millis();
     sendHello();
@@ -209,6 +218,7 @@ void Transport::loop() {
     }
   }
   if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
+    maintainHostAddress();
     pollOsc();
     if (needsOscHello()) {
       const uint32_t now = millis();
@@ -226,8 +236,8 @@ void Transport::sendBpm(float bpm) {
     snprintf(line, sizeof(line), "bpm %.1f", bpm);
     sendSerialLine(line);
   }
-  if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
-    sendOscFloat(host_, oscPort_, kBpmAddress, bpm);
+  if (readyToSendOsc()) {
+    sendOscFloat(IPAddress(hostIp_), oscPort_, kBpmAddress, bpm);
   }
 }
 
@@ -235,8 +245,8 @@ void Transport::sendStartStop() {
   if (useSerialClock_) {
     sendSerialLine("start_stop");
   }
-  if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
-    sendOscTrigger(host_, oscPort_, kStartStopAddress);
+  if (readyToSendOsc()) {
+    sendOscTrigger(IPAddress(hostIp_), oscPort_, kStartStopAddress);
   }
 }
 
@@ -244,8 +254,8 @@ void Transport::sendClickToggle() {
   if (useSerialClock_) {
     sendSerialLine("click_toggle");
   }
-  if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
-    sendOscTrigger(host_, oscPort_, kClickToggleAddress);
+  if (readyToSendOsc()) {
+    sendOscTrigger(IPAddress(hostIp_), oscPort_, kClickToggleAddress);
   }
 }
 
@@ -255,8 +265,8 @@ void Transport::sendInterval(const char* interval) {
     snprintf(line, sizeof(line), "interval %s", interval);
     sendSerialLine(line);
   }
-  if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
-    sendOscString(host_, oscPort_, kIntervalAddress, interval);
+  if (readyToSendOsc()) {
+    sendOscString(IPAddress(hostIp_), oscPort_, kIntervalAddress, interval);
   }
 }
 
@@ -264,8 +274,8 @@ void Transport::sendTapTempo() {
   if (useSerialClock_) {
     sendSerialLine("tap_tempo");
   }
-  if (useWifiClock_ && WiFi.status() == WL_CONNECTED) {
-    sendOscTrigger(host_, oscPort_, kTapTempoAddress);
+  if (readyToSendOsc()) {
+    sendOscTrigger(IPAddress(hostIp_), oscPort_, kTapTempoAddress);
   }
 }
 
@@ -310,25 +320,29 @@ bool Transport::isOscConnected() const {
   if (!isWifiConnected()) {
     return false;
   }
-  if (!hostSyncReceived_ || lastHostSyncMs_ == 0) {
+  if (!oscSyncReceived_ || lastOscSyncMs_ == 0) {
     return false;
   }
-  return millis() - lastHostSyncMs_ < 10000;
+  return millis() - lastOscSyncMs_ < 10000;
 }
 
-void Transport::markHostSyncReceived() {
-  hostSyncReceived_ = true;
-  lastHostSyncMs_ = millis();
+void Transport::markOscSyncReceived() {
+  oscSyncReceived_ = true;
+  lastOscSyncMs_ = millis();
 }
 
 bool Transport::needsOscHello() const {
   if (!useWifiClock_ || WiFi.status() != WL_CONNECTED) {
     return false;
   }
-  if (!hostSyncReceived_) {
+  if (!oscSyncReceived_) {
     return true;
   }
-  return millis() - lastHostSyncMs_ >= 10000;
+  return millis() - lastOscSyncMs_ >= 10000;
+}
+
+bool Transport::readyToSendOsc() const {
+  return useWifiClock_ && hostIpValid_ && WiFi.status() == WL_CONNECTED;
 }
 
 void Transport::sendSerialLine(const char* line) {
@@ -448,14 +462,20 @@ void Transport::connectWifi(const DeviceConfig& config, bool runPortal) {
   gRx.stop();
   wifiRxReady_ = false;
   connectedSsid_[0] = '\0';
-  WiFi.disconnect(true);
+  hostIpValid_ = false;
 
   if (!wifiEnabled_) {
+    WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
     return;
   }
 
+  // disconnect(true) powers the radio off and races with begin(), so a single
+  // attempt often never leaves WL_DISCONNECTED. Keep the STA radio up and retry.
+  WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.setAutoReconnect(true);
 
   if (runPortal) {
     WiFiManager manager;
@@ -472,6 +492,7 @@ void Transport::connectWifi(const DeviceConfig& config, bool runPortal) {
     return;
   }
 
+  lastWifiAttemptMs_ = millis();
   WiFi.begin(config.wifiSsid, config.wifiPass);
   Serial.printf("wifi: connecting to %s (non-blocking)\n", config.wifiSsid);
 }
@@ -480,13 +501,33 @@ void Transport::maintainWifi() {
   if (!useWifiClock_ || !wifiEnabled_) {
     return;
   }
+  const int status = static_cast<int>(WiFi.status());
+  if (status != lastWifiStatus_) {
+    Serial.printf("wifi: status %d\n", status);
+    lastWifiStatus_ = status;
+  }
   if (WiFi.status() != WL_CONNECTED) {
     if (wifiRxReady_) {
       gRx.stop();
       wifiRxReady_ = false;
       connectedSsid_[0] = '\0';
+      hostIpValid_ = false;
       stopMdns();
     }
+    if (deviceConfig_ == nullptr || deviceConfig_->wifiSsid[0] == '\0') {
+      return;
+    }
+    const uint32_t now = millis();
+    if (lastWifiAttemptMs_ != 0 && now - lastWifiAttemptMs_ < 8000) {
+      return;
+    }
+    lastWifiAttemptMs_ = now;
+    WiFi.persistent(false);
+    WiFi.mode(WIFI_STA);
+    WiFi.setSleep(false);
+    WiFi.setAutoReconnect(true);
+    WiFi.begin(deviceConfig_->wifiSsid, deviceConfig_->wifiPass);
+    Serial.printf("wifi: retry %s\n", deviceConfig_->wifiSsid);
     return;
   }
   if (wifiRxReady_) {
@@ -495,11 +536,69 @@ void Transport::maintainWifi() {
   onWifiReady();
 }
 
+bool Transport::resolveOscHost(uint32_t* ip) const {
+  if (ip == nullptr || host_[0] == '\0') {
+    return false;
+  }
+  IPAddress literal;
+  if (literal.fromString(host_)) {
+    *ip = static_cast<uint32_t>(literal);
+    return *ip != 0;
+  }
+
+  char name[48];
+  strlcpy(name, host_, sizeof(name));
+  const size_t len = strlen(name);
+  if (len > 6 && strcasecmp(name + len - 6, ".local") == 0) {
+    name[len - 6] = '\0';
+    const IPAddress found = MDNS.queryHost(name, 800);
+    if (found == IPAddress()) {
+      return false;
+    }
+    *ip = static_cast<uint32_t>(found);
+    return true;
+  }
+
+  IPAddress found;
+  if (WiFi.hostByName(host_, found) != 1 || found == IPAddress()) {
+    return false;
+  }
+  *ip = static_cast<uint32_t>(found);
+  return true;
+}
+
+void Transport::maintainHostAddress() {
+  if (!useWifiClock_ || WiFi.status() != WL_CONNECTED || host_[0] == '\0') {
+    return;
+  }
+  const uint32_t now = millis();
+  const uint32_t refreshMs = hostIpValid_ ? 60000 : 3000;
+  if (lastHostResolveMs_ != 0 && now - lastHostResolveMs_ < refreshMs) {
+    return;
+  }
+  lastHostResolveMs_ = now;
+  uint32_t resolved = 0;
+  if (!resolveOscHost(&resolved)) {
+    if (!hostIpValid_) {
+      Serial.printf("wifi: OSC host %s did not resolve\n", host_);
+    }
+    return;
+  }
+  if (!hostIpValid_ || resolved != hostIp_) {
+    hostIp_ = resolved;
+    hostIpValid_ = true;
+    Serial.printf("wifi: OSC host %s -> %s\n", host_, IPAddress(hostIp_).toString().c_str());
+    return;
+  }
+  hostIpValid_ = true;
+}
+
 void Transport::onWifiReady() {
   strlcpy(connectedSsid_, WiFi.SSID().c_str(), sizeof(connectedSsid_));
   gRx.begin(listenPort_);
   wifiRxReady_ = true;
   startMdns();
+  maintainHostAddress();
   lastOscHelloMs_ = millis();
   sendOscHello();
 }
@@ -520,14 +619,19 @@ void Transport::startMdns() {
   }
 
   if (!MDNS.begin(hostname)) {
-    Serial.println("mdns: begin failed");
+    mdnsOk_ = false;
+    Serial.println("mdns: begin failed, hello will use the device IP");
     return;
   }
+  mdnsOk_ = true;
   MDNS.addService("midijuggler-rotary", "udp", listenPort_);
   Serial.printf("mdns: advertised %s.local\n", hostname);
 }
 
-void Transport::stopMdns() { MDNS.end(); }
+void Transport::stopMdns() {
+  MDNS.end();
+  mdnsOk_ = false;
+}
 
 void Transport::feedbackAddress(char* buffer, size_t length) const {
   if (buffer == nullptr || length == 0) {
@@ -544,8 +648,10 @@ void Transport::feedbackAddress(char* buffer, size_t length) const {
     snprintf(hostname, sizeof(hostname), "rotary-%02x%02x%02x", mac[3], mac[4], mac[5]);
   }
 
-  if (hostname[0] == '\0') {
-    strlcpy(buffer, WiFi.localIP().toString().c_str(), length);
+  if (!mdnsOk_ || hostname[0] == '\0') {
+    if (WiFi.status() == WL_CONNECTED) {
+      strlcpy(buffer, WiFi.localIP().toString().c_str(), length);
+    }
     return;
   }
   snprintf(buffer, length, "%s.local", hostname);
@@ -555,21 +661,35 @@ void Transport::disconnectWifi() {
   gRx.stop();
   wifiRxReady_ = false;
   connectedSsid_[0] = '\0';
+  hostIpValid_ = false;
   stopMdns();
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
 }
 
-void Transport::sendOscBpm(float bpm) { sendOscFloat(host_, oscPort_, kBpmAddress, bpm); }
+void Transport::sendOscBpm(float bpm) {
+  if (!readyToSendOsc()) {
+    return;
+  }
+  sendOscFloat(IPAddress(hostIp_), oscPort_, kBpmAddress, bpm);
+}
 
 void Transport::sendOscInterval(const char* interval) {
-  sendOscString(host_, oscPort_, kIntervalAddress, interval);
+  if (!readyToSendOsc()) {
+    return;
+  }
+  sendOscString(IPAddress(hostIp_), oscPort_, kIntervalAddress, interval);
 }
 
 void Transport::sendOscHello() {
+  if (!readyToSendOsc()) {
+    return;
+  }
   char feedbackHost[64] = {0};
   feedbackAddress(feedbackHost, sizeof(feedbackHost));
-  sendOscHelloPacket(host_, oscPort_, feedbackHost, listenPort_);
+  Serial.printf("wifi: OSC hello -> %s:%u as %s:%u\n", IPAddress(hostIp_).toString().c_str(),
+                oscPort_, feedbackHost, listenPort_);
+  sendOscHelloPacket(IPAddress(hostIp_), oscPort_, feedbackHost, listenPort_);
 }
 
 bool Transport::shouldAcceptSerialBeat() const {
@@ -732,7 +852,7 @@ void Transport::pollOsc() {
     }
     if (valid) {
       pendingSync_ = payload;
-      markHostSyncReceived();
+      markOscSyncReceived();
       if (onSync_) {
         onSync_(payload);
       }
@@ -781,7 +901,8 @@ void Transport::dispatchLine(const char* line) {
   float beat = 0.0f;
   if (parseSyncLine(line, &payload)) {
     pendingSync_ = payload;
-    markHostSyncReceived();
+    // USB sync keeps the display alive, but it is not OSC registration.
+    // Counting it here stopped hello retries while the host stayed on serial.
     if (onSync_) {
       onSync_(payload);
     }

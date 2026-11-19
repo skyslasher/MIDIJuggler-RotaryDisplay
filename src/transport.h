@@ -52,15 +52,24 @@ class Transport {
   size_t serialLength_ = 0;
   uint32_t lastHelloMs_ = 0;
   uint32_t lastOscHelloMs_ = 0;
-  uint32_t lastHostSyncMs_ = 0;
-  bool hostSyncReceived_ = false;
+  uint32_t lastOscSyncMs_ = 0;
+  bool oscSyncReceived_ = false;
   uint32_t lastBeatPulseMs_ = 0;
+  uint32_t lastWifiAttemptMs_ = 0;
+  int lastWifiStatus_ = -1;
   bool wifiRxReady_ = false;
+  bool mdnsOk_ = false;
+  bool hostIpValid_ = false;
+  uint32_t hostIp_ = 0;
+  uint32_t lastHostResolveMs_ = 0;
   char connectedSsid_[33] = "";
   SyncPayload pendingSync_;
 
   void sendSerialLine(const char* line);
   void maintainWifi();
+  void maintainHostAddress();
+  bool resolveOscHost(uint32_t* ip) const;
+  bool readyToSendOsc() const;
   void sendConfigLine(const char* line);
   void sendConfigError(const char* reason);
   void emitConfigGet();
@@ -78,7 +87,7 @@ class Transport {
   void pollOsc();
   void dispatchLine(const char* line);
   void emitSync();
-  void markHostSyncReceived();
+  void markOscSyncReceived();
   bool needsOscHello() const;
   bool shouldAcceptSerialBeat() const;
   bool shouldAcceptOscBeat() const;

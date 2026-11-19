@@ -1,18 +1,19 @@
 #include "touch_settings.h"
 
+#include <Arduino.h>
+
 #include "board.h"
 #include "display_ui.h"
 
 namespace {
 
 constexpr uint8_t kTouchAddr = 0x15;
-constexpr int kSwipeThreshold = 35;
+// 240px panel. The CST816 reports slide gestures for small finger shifts, so a
+// press must travel a large fraction of the screen before it is a swipe.
+constexpr int kSwipeThreshold = 80;
+constexpr uint32_t kSwipeMinDurationMs = 80;
+constexpr uint32_t kReleaseDebounceMs = 30;
 constexpr int kPageCount = static_cast<int>(SettingsPage::Count);
-
-constexpr uint8_t kGestureNone = 0x00;
-constexpr uint8_t kGestureSlideLeft = 0x03;
-constexpr uint8_t kGestureSlideRight = 0x04;
-constexpr uint8_t kGestureSingleTap = 0x05;
 
 int wrapPage(int page, int delta) {
   return (page + delta + kPageCount) % kPageCount;
@@ -75,52 +76,57 @@ bool TouchSettings::readTouch(int* x, int* y) {
   return true;
 }
 
-uint8_t TouchSettings::readGesture() {
-  uint8_t gesture = kGestureNone;
-  i2cRead(0x01, &gesture);
-  return gesture;
-}
-
 void TouchSettings::loop(UiState* state, const ActionCallback& onAction) {
   static int startX = 0;
   static int startY = 0;
   static int lastX = 0;
   static int lastY = 0;
+  static uint32_t touchStartedMs = 0;
+  static uint32_t lostContactMs = 0;
   static bool touching = false;
   int x = 0;
   int y = 0;
 
   if (!readTouch(&x, &y)) {
-    if (touching) {
-      const uint8_t gesture = readGesture();
-      const int dx = lastX - startX;
-      const int dy = lastY - startY;
+    if (!touching) {
+      return;
+    }
+    const uint32_t now = millis();
+    if (lostContactMs == 0) {
+      lostContactMs = now;
+      return;
+    }
+    if (now - lostContactMs < kReleaseDebounceMs) {
+      return;
+    }
 
-      if (gesture == kGestureSlideRight) {
-        state->settingsPage = wrapPage(state->settingsPage, 1);
-      } else if (gesture == kGestureSlideLeft) {
-        state->settingsPage = wrapPage(state->settingsPage, -1);
-      } else if (abs(dx) > kSwipeThreshold && abs(dx) >= abs(dy)) {
-        if (dx > 0) {
-          state->settingsPage = wrapPage(state->settingsPage, 1);
-        } else {
-          state->settingsPage = wrapPage(state->settingsPage, -1);
-        }
-      } else if ((gesture == kGestureSingleTap ||
-                  (abs(dx) <= kSwipeThreshold && abs(dy) <= kSwipeThreshold)) &&
-                 state->settingsPage == static_cast<int>(SettingsPage::Bpm)) {
-        onAction(state->settingsPage, true);
-      }
+    const int dx = lastX - startX;
+    const int dy = lastY - startY;
+    const int travelX = abs(dx);
+    const int travelY = abs(dy);
+    const uint32_t elapsed = now - touchStartedMs;
+    // The CST816 slide gesture fires on a small finger shift during a press.
+    // Page changes follow measured travel only.
+    const bool swipe = travelX >= kSwipeThreshold && travelX >= travelY &&
+                       elapsed >= kSwipeMinDurationMs;
+    if (swipe) {
+      state->settingsPage = wrapPage(state->settingsPage, dx > 0 ? 1 : -1);
+    } else if (travelX < kSwipeThreshold && travelY < kSwipeThreshold &&
+               state->settingsPage == static_cast<int>(SettingsPage::Bpm)) {
+      onAction(state->settingsPage, true);
     }
     touching = false;
+    lostContactMs = 0;
     return;
   }
 
+  lostContactMs = 0;
   lastX = x;
   lastY = y;
   if (!touching) {
     startX = x;
     startY = y;
+    touchStartedMs = millis();
     touching = true;
   }
 }
