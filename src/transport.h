@@ -56,6 +56,7 @@ class Transport {
   bool oscSyncReceived_ = false;
   uint32_t lastBeatPulseMs_ = 0;
   uint32_t lastWifiAttemptMs_ = 0;
+  bool wifiScanActive_ = false;
   int lastWifiStatus_ = -1;
   bool wifiRxReady_ = false;
   bool mdnsOk_ = false;
@@ -75,6 +76,11 @@ class Transport {
   void emitConfigGet();
   bool handleConfigLine(const char* line);
   void connectWifi(const DeviceConfig& config, bool runPortal);
+  void prepareWifiRadio();
+  void startWifiScan();
+  void finishWifiScan(const char* ssid, const char* pass);
+  void joinWifi(const char* ssid, const char* pass, int32_t channel, const uint8_t* bssid,
+                int32_t rssi);
   void disconnectWifi();
   void onWifiReady();
   void startMdns();

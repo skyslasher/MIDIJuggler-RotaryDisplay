@@ -6,6 +6,8 @@
 #include <WiFiManager.h>
 #include <WiFiUdp.h>
 
+#include <cstring>
+
 namespace {
 
 constexpr const char* kBpmAddress = "/midijuggler/clock/bpm";
@@ -23,6 +25,18 @@ constexpr const char* kFeedbackClickIntervalAddress = "/midijuggler/rotary/click
 
 WiFiUDP gTx;
 WiFiUDP gRx;
+
+// Long enough for a full-channel join. The old 8s WiFi.begin() restart
+// aborted association before it could finish.
+constexpr uint32_t kWifiJoinRetryMs = 15000;
+
+bool sameSsid(const char* configured, const String& scanned) {
+  if (configured == nullptr) {
+    return false;
+  }
+  const size_t len = strlen(configured);
+  return scanned.length() == len && memcmp(scanned.c_str(), configured, len) == 0;
+}
 
 size_t pad4(size_t size) { return (size + 3) & ~static_cast<size_t>(3); }
 
@@ -458,11 +472,121 @@ bool Transport::handleConfigLine(const char* line) {
   return false;
 }
 
+void Transport::prepareWifiRadio() {
+  // Keep the STA radio up. disconnect(true) powers it off and races with begin().
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.setAutoReconnect(true);
+
+  static bool hooked = false;
+  if (!hooked) {
+    hooked = true;
+    WiFi.onEvent([](arduino_event_id_t event, arduino_event_info_t info) {
+      if (event != ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+        return;
+      }
+      const uint8_t len = info.wifi_sta_disconnected.ssid_len;
+      char seen[33] = {};
+      if (len < sizeof(seen)) {
+        memcpy(seen, info.wifi_sta_disconnected.ssid, len);
+      }
+      Serial.printf("wifi: disconnected reason %u ssid [%s] len %u\n",
+                    info.wifi_sta_disconnected.reason, seen, len);
+    });
+  }
+  // Default WIFI_FAST_SCAN asks the driver to match the SSID. That match does
+  // not associate when the name contains a space, even though our buffer holds
+  // the full string. Compare the beacon ourselves and join that BSSID.
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+  WiFi.setMinSecurity(WIFI_AUTH_OPEN);
+}
+
+void Transport::joinWifi(const char* ssid, const char* pass, int32_t channel, const uint8_t* bssid,
+                         int32_t rssi) {
+  if (ssid == nullptr) {
+    return;
+  }
+  if (pass == nullptr) {
+    pass = "";
+  }
+  wl_status_t status = WiFi.begin(ssid, pass, channel, bssid);
+  if (status == WL_CONNECT_FAILED) {
+    WiFi.disconnect(false, false);
+    status = WiFi.begin(ssid, pass, channel, bssid);
+  }
+  if (bssid != nullptr) {
+    Serial.printf("wifi: join %s len=%u passLen=%u ch=%ld rssi=%ld status=%d\n", ssid,
+                  static_cast<unsigned>(strlen(ssid)), static_cast<unsigned>(strlen(pass)),
+                  static_cast<long>(channel), static_cast<long>(rssi), static_cast<int>(status));
+  } else {
+    Serial.printf("wifi: directed %s len=%u passLen=%u status=%d\n", ssid,
+                  static_cast<unsigned>(strlen(ssid)), static_cast<unsigned>(strlen(pass)),
+                  static_cast<int>(status));
+  }
+  lastWifiAttemptMs_ = millis();
+  wifiScanActive_ = false;
+}
+
+void Transport::finishWifiScan(const char* ssid, const char* pass) {
+  const int16_t count = WiFi.scanComplete();
+  if (count == WIFI_SCAN_RUNNING) {
+    return;
+  }
+
+  int best = -1;
+  int32_t bestRssi = -1000;
+  const size_t ssidLen = ssid == nullptr ? 0 : strlen(ssid);
+  if (count > 0 && ssidLen > 0) {
+    for (int16_t i = 0; i < count; ++i) {
+      const String ap = WiFi.SSID(static_cast<uint8_t>(i));
+      if (!sameSsid(ssid, ap)) {
+        continue;
+      }
+      const int32_t rssi = WiFi.RSSI(static_cast<uint8_t>(i));
+      if (best < 0 || rssi > bestRssi) {
+        best = i;
+        bestRssi = rssi;
+      }
+    }
+  }
+
+  uint8_t bssid[6] = {};
+  int32_t channel = 0;
+  const uint8_t* bssidPtr = nullptr;
+  if (best >= 0 && WiFi.BSSID(static_cast<uint8_t>(best)) != nullptr) {
+    memcpy(bssid, WiFi.BSSID(static_cast<uint8_t>(best)), sizeof(bssid));
+    channel = WiFi.channel(static_cast<uint8_t>(best));
+    bssidPtr = bssid;
+  } else {
+    Serial.printf("wifi: %s len=%u not in scan (%d)\n", ssid == nullptr ? "" : ssid,
+                  static_cast<unsigned>(ssidLen), static_cast<int>(count));
+  }
+  WiFi.scanDelete();
+  joinWifi(ssid, pass, channel, bssidPtr, bestRssi);
+}
+
+void Transport::startWifiScan() {
+  prepareWifiRadio();
+  lastWifiAttemptMs_ = millis();
+  const int16_t started = WiFi.scanNetworks(true, true);
+  if (started == WIFI_SCAN_FAILED) {
+    wifiScanActive_ = false;
+    const char* ssid = deviceConfig_ == nullptr ? "" : deviceConfig_->wifiSsid;
+    const char* pass = deviceConfig_ == nullptr ? "" : deviceConfig_->wifiPass;
+    joinWifi(ssid, pass, 0, nullptr, -127);
+    return;
+  }
+  wifiScanActive_ = true;
+}
+
 void Transport::connectWifi(const DeviceConfig& config, bool runPortal) {
   gRx.stop();
   wifiRxReady_ = false;
   connectedSsid_[0] = '\0';
   hostIpValid_ = false;
+  wifiScanActive_ = false;
 
   if (!wifiEnabled_) {
     WiFi.disconnect(true);
@@ -470,14 +594,8 @@ void Transport::connectWifi(const DeviceConfig& config, bool runPortal) {
     return;
   }
 
-  // disconnect(true) powers the radio off and races with begin(), so a single
-  // attempt often never leaves WL_DISCONNECTED. Keep the STA radio up and retry.
-  WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
-  WiFi.setAutoReconnect(true);
-
   if (runPortal) {
+    WiFi.scanDelete();
     WiFiManager manager;
     manager.setConfigPortalTimeout(120);
     manager.autoConnect("RotaryDisplay-Setup");
@@ -492,9 +610,7 @@ void Transport::connectWifi(const DeviceConfig& config, bool runPortal) {
     return;
   }
 
-  lastWifiAttemptMs_ = millis();
-  WiFi.begin(config.wifiSsid, config.wifiPass);
-  Serial.printf("wifi: connecting to %s (non-blocking)\n", config.wifiSsid);
+  startWifiScan();
 }
 
 void Transport::maintainWifi() {
@@ -517,17 +633,17 @@ void Transport::maintainWifi() {
     if (deviceConfig_ == nullptr || deviceConfig_->wifiSsid[0] == '\0') {
       return;
     }
-    const uint32_t now = millis();
-    if (lastWifiAttemptMs_ != 0 && now - lastWifiAttemptMs_ < 8000) {
+    if (wifiScanActive_) {
+      finishWifiScan(deviceConfig_->wifiSsid, deviceConfig_->wifiPass);
       return;
     }
-    lastWifiAttemptMs_ = now;
-    WiFi.persistent(false);
-    WiFi.mode(WIFI_STA);
-    WiFi.setSleep(false);
-    WiFi.setAutoReconnect(true);
-    WiFi.begin(deviceConfig_->wifiSsid, deviceConfig_->wifiPass);
-    Serial.printf("wifi: retry %s\n", deviceConfig_->wifiSsid);
+    const uint32_t now = millis();
+    if (lastWifiAttemptMs_ != 0 && now - lastWifiAttemptMs_ < kWifiJoinRetryMs) {
+      return;
+    }
+    Serial.printf("wifi: retry %s len=%u\n", deviceConfig_->wifiSsid,
+                  static_cast<unsigned>(strlen(deviceConfig_->wifiSsid)));
+    startWifiScan();
     return;
   }
   if (wifiRxReady_) {
@@ -660,9 +776,11 @@ void Transport::feedbackAddress(char* buffer, size_t length) const {
 void Transport::disconnectWifi() {
   gRx.stop();
   wifiRxReady_ = false;
+  wifiScanActive_ = false;
   connectedSsid_[0] = '\0';
   hostIpValid_ = false;
   stopMdns();
+  WiFi.scanDelete();
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
 }
