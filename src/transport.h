@@ -55,7 +55,8 @@ class Transport {
   uint32_t lastOscSyncMs_ = 0;
   bool oscSyncReceived_ = false;
   uint32_t lastBeatPulseMs_ = 0;
-  uint32_t lastWifiAttemptMs_ = 0;
+  uint32_t scanStartMs_ = 0;
+  uint32_t staBusySinceMs_ = 0;
   bool wifiScanActive_ = false;
   int lastWifiStatus_ = -1;
   bool wifiRxReady_ = false;
