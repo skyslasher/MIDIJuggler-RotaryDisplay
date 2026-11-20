@@ -60,6 +60,12 @@ class Transport {
   int lastWifiStatus_ = -1;
   bool wifiRxReady_ = false;
   bool mdnsOk_ = false;
+  bool mdnsServiceAdded_ = false;
+  mutable bool mdnsRejectLogged_ = false;
+  uint16_t mdnsPort_ = 0;
+  uint32_t mdnsIp_ = 0;
+  uint32_t lastMdnsAttemptMs_ = 0;
+  char mdnsAdvertised_[32] = "";
   bool hostIpValid_ = false;
   uint32_t hostIp_ = 0;
   uint32_t lastHostResolveMs_ = 0;
@@ -77,6 +83,9 @@ class Transport {
   bool handleConfigLine(const char* line);
   void connectWifi(const DeviceConfig& config, bool runPortal);
   void prepareWifiRadio();
+  void ensureWifiHooks();
+  bool buildMdnsHostname(char* dest, size_t destSize) const;
+  void applyStaHostname();
   void startWifiScan();
   void finishWifiScan(const char* ssid, const char* pass);
   void joinWifi(const char* ssid, const char* pass, int32_t channel, const uint8_t* bssid,

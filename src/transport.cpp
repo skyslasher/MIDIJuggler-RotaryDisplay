@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <WiFiUdp.h>
+#include <esp_netif.h>
 
 #include <cstring>
 
@@ -29,6 +30,53 @@ WiFiUDP gRx;
 // Long enough for a full-channel join. The old 8s WiFi.begin() restart
 // aborted association before it could finish.
 constexpr uint32_t kWifiJoinRetryMs = 15000;
+constexpr uint32_t kMdnsRetryMs = 2000;
+
+// Set from the Wi-Fi event task. Loop re-announces mDNS; MDNS.begin from the
+// event callback deadlocks the mdns task against the event loop.
+volatile bool gStaGotIp = false;
+
+bool isMdnsLabelChar(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-';
+}
+
+bool sanitizeMdnsLabel(char* dest, size_t destSize, const char* raw) {
+  if (dest == nullptr || destSize < 2) {
+    return false;
+  }
+  dest[0] = '\0';
+  if (raw == nullptr) {
+    return false;
+  }
+  while (*raw == ' ') {
+    raw++;
+  }
+  char buf[32];
+  strlcpy(buf, raw, sizeof(buf));
+  size_t len = strlen(buf);
+  while (len > 0 && (buf[len - 1] == ' ' || buf[len - 1] == '.')) {
+    buf[--len] = '\0';
+  }
+  if (len >= 6 && strcasecmp(buf + len - 6, ".local") == 0) {
+    len -= 6;
+    buf[len] = '\0';
+  }
+  if (len == 0 || len >= destSize || buf[0] == '-' || buf[len - 1] == '-') {
+    return false;
+  }
+  for (size_t i = 0; i < len; ++i) {
+    char c = buf[i];
+    if (c >= 'A' && c <= 'Z') {
+      c = static_cast<char>(c - 'A' + 'a');
+    }
+    if (!isMdnsLabelChar(c)) {
+      return false;
+    }
+    buf[i] = c;
+  }
+  strlcpy(dest, buf, destSize);
+  return true;
+}
 
 bool sameSsid(const char* configured, const String& scanned) {
   if (configured == nullptr) {
@@ -472,29 +520,70 @@ bool Transport::handleConfigLine(const char* line) {
   return false;
 }
 
+void Transport::ensureWifiHooks() {
+  static bool hooked = false;
+  if (hooked) {
+    return;
+  }
+  hooked = true;
+  WiFi.onEvent([](arduino_event_id_t event, arduino_event_info_t info) {
+    if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+      gStaGotIp = true;
+      return;
+    }
+    if (event != ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+      return;
+    }
+    gStaGotIp = false;
+    const uint8_t len = info.wifi_sta_disconnected.ssid_len;
+    char seen[33] = {};
+    if (len < sizeof(seen)) {
+      memcpy(seen, info.wifi_sta_disconnected.ssid, len);
+    }
+    Serial.printf("wifi: disconnected reason %u ssid [%s] len %u\n",
+                  info.wifi_sta_disconnected.reason, seen, len);
+  });
+}
+
+bool Transport::buildMdnsHostname(char* dest, size_t destSize) const {
+  if (deviceConfig_ != nullptr && deviceConfig_->mdnsHostname[0] != '\0' &&
+      sanitizeMdnsLabel(dest, destSize, deviceConfig_->mdnsHostname)) {
+    mdnsRejectLogged_ = false;
+    return true;
+  }
+  if (deviceConfig_ != nullptr && deviceConfig_->mdnsHostname[0] != '\0' && !mdnsRejectLogged_) {
+    mdnsRejectLogged_ = true;
+    Serial.printf("mdns: hostname=%s rejected\n", deviceConfig_->mdnsHostname);
+  }
+  uint8_t mac[6] = {};
+  WiFi.macAddress(mac);
+  snprintf(dest, destSize, "rotary-%02x%02x%02x", mac[3], mac[4], mac[5]);
+  return dest[0] != '\0';
+}
+
+void Transport::applyStaHostname() {
+  char hostname[32] = {};
+  if (!buildMdnsHostname(hostname, sizeof(hostname))) {
+    return;
+  }
+  // mode(WIFI_STA) copies this into the netif only when the mode changes.
+  // Set it first, then push it onto a netif that is already up.
+  WiFi.setHostname(hostname);
+  esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  if (netif != nullptr) {
+    esp_netif_set_hostname(netif, hostname);
+  }
+}
+
 void Transport::prepareWifiRadio() {
   // Keep the STA radio up. disconnect(true) powers it off and races with begin().
   WiFi.persistent(false);
+  ensureWifiHooks();
+  applyStaHostname();
   WiFi.mode(WIFI_STA);
+  applyStaHostname();
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
-
-  static bool hooked = false;
-  if (!hooked) {
-    hooked = true;
-    WiFi.onEvent([](arduino_event_id_t event, arduino_event_info_t info) {
-      if (event != ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
-        return;
-      }
-      const uint8_t len = info.wifi_sta_disconnected.ssid_len;
-      char seen[33] = {};
-      if (len < sizeof(seen)) {
-        memcpy(seen, info.wifi_sta_disconnected.ssid, len);
-      }
-      Serial.printf("wifi: disconnected reason %u ssid [%s] len %u\n",
-                    info.wifi_sta_disconnected.reason, seen, len);
-    });
-  }
   // Default WIFI_FAST_SCAN asks the driver to match the SSID. That match does
   // not associate when the name contains a space, even though our buffer holds
   // the full string. Compare the beacon ourselves and join that BSSID.
@@ -511,6 +600,7 @@ void Transport::joinWifi(const char* ssid, const char* pass, int32_t channel, co
   if (pass == nullptr) {
     pass = "";
   }
+  applyStaHostname();
   wl_status_t status = WiFi.begin(ssid, pass, channel, bssid);
   if (status == WL_CONNECT_FAILED) {
     WiFi.disconnect(false, false);
@@ -595,6 +685,8 @@ void Transport::connectWifi(const DeviceConfig& config, bool runPortal) {
   }
 
   if (runPortal) {
+    ensureWifiHooks();
+    applyStaHostname();
     WiFi.scanDelete();
     WiFiManager manager;
     manager.setConfigPortalTimeout(120);
@@ -628,7 +720,13 @@ void Transport::maintainWifi() {
       wifiRxReady_ = false;
       connectedSsid_[0] = '\0';
       hostIpValid_ = false;
-      stopMdns();
+    }
+    // Leave the mDNS responder initialized. mdns_free() drops the IP-event
+    // handler, and the next MDNS.begin often never binds the STA again.
+    // GOT_IP re-announces once the address is back.
+    if (mdnsOk_) {
+      mdnsOk_ = false;
+      mdnsIp_ = 0;
     }
     if (deviceConfig_ == nullptr || deviceConfig_->wifiSsid[0] == '\0') {
       return;
@@ -646,10 +744,26 @@ void Transport::maintainWifi() {
     startWifiScan();
     return;
   }
-  if (wifiRxReady_) {
+  if (gStaGotIp) {
+    gStaGotIp = false;
+    mdnsOk_ = false;
+    mdnsIp_ = 0;
+  }
+  if (!wifiRxReady_) {
+    onWifiReady();
     return;
   }
-  onWifiReady();
+  if (mdnsOk_) {
+    return;
+  }
+  const uint32_t now = millis();
+  if (lastMdnsAttemptMs_ != 0 && now - lastMdnsAttemptMs_ < kMdnsRetryMs) {
+    return;
+  }
+  startMdns();
+  if (mdnsOk_) {
+    sendOscHello();
+  }
 }
 
 bool Transport::resolveOscHost(uint32_t* ip) const {
@@ -720,33 +834,68 @@ void Transport::onWifiReady() {
 }
 
 void Transport::startMdns() {
-  stopMdns();
+  lastMdnsAttemptMs_ = millis();
   if (!useWifiClock_ || !wifiEnabled_ || WiFi.status() != WL_CONNECTED) {
     return;
   }
 
-  char hostname[32] = {0};
-  if (deviceConfig_ != nullptr && deviceConfig_->mdnsHostname[0] != '\0') {
-    strlcpy(hostname, deviceConfig_->mdnsHostname, sizeof(hostname));
-  } else {
-    uint8_t mac[6] = {0};
-    WiFi.macAddress(mac);
-    snprintf(hostname, sizeof(hostname), "rotary-%02x%02x%02x", mac[3], mac[4], mac[5]);
+  char hostname[32] = {};
+  if (!buildMdnsHostname(hostname, sizeof(hostname))) {
+    mdnsOk_ = false;
+    Serial.println("mdns: hostname= begin failed");
+    return;
+  }
+  const IPAddress ip = WiFi.localIP();
+  if (ip == IPAddress(0U)) {
+    mdnsOk_ = false;
+    Serial.printf("mdns: hostname=%s.local begin failed\n", hostname);
+    return;
+  }
+  const uint32_t ipValue = static_cast<uint32_t>(ip);
+  if (mdnsOk_ && mdnsServiceAdded_ && mdnsPort_ == listenPort_ && mdnsIp_ == ipValue &&
+      strcmp(mdnsAdvertised_, hostname) == 0) {
+    return;
+  }
+
+  // Modem sleep drops multicast replies. Re-apply after the station has an IP.
+  WiFi.setSleep(false);
+  applyStaHostname();
+
+  if (mdnsServiceAdded_ && (strcmp(mdnsAdvertised_, hostname) != 0 || mdnsPort_ != listenPort_)) {
+    MDNS.end();
+    mdnsServiceAdded_ = false;
+    mdnsAdvertised_[0] = '\0';
   }
 
   if (!MDNS.begin(hostname)) {
     mdnsOk_ = false;
-    Serial.println("mdns: begin failed, hello will use the device IP");
+    Serial.printf("mdns: hostname=%s.local begin failed\n", hostname);
     return;
   }
+  if (!mdnsServiceAdded_) {
+    if (!MDNS.addService("midijuggler-rotary", "udp", listenPort_)) {
+      mdnsOk_ = false;
+      Serial.printf("mdns: hostname=%s.local service failed\n", hostname);
+      return;
+    }
+    mdnsServiceAdded_ = true;
+    mdnsPort_ = listenPort_;
+    strlcpy(mdnsAdvertised_, hostname, sizeof(mdnsAdvertised_));
+  }
   mdnsOk_ = true;
-  MDNS.addService("midijuggler-rotary", "udp", listenPort_);
-  Serial.printf("mdns: advertised %s.local\n", hostname);
+  mdnsIp_ = ipValue;
+  Serial.printf("mdns: hostname=%s.local\n", hostname);
 }
 
 void Transport::stopMdns() {
-  MDNS.end();
+  if (mdnsServiceAdded_ || mdnsOk_) {
+    MDNS.end();
+  }
+  mdnsServiceAdded_ = false;
   mdnsOk_ = false;
+  mdnsPort_ = 0;
+  mdnsIp_ = 0;
+  mdnsAdvertised_[0] = '\0';
 }
 
 void Transport::feedbackAddress(char* buffer, size_t length) const {
@@ -755,16 +904,8 @@ void Transport::feedbackAddress(char* buffer, size_t length) const {
   }
   buffer[0] = '\0';
 
-  char hostname[32] = {0};
-  if (deviceConfig_ != nullptr && deviceConfig_->mdnsHostname[0] != '\0') {
-    strlcpy(hostname, deviceConfig_->mdnsHostname, sizeof(hostname));
-  } else if (WiFi.status() == WL_CONNECTED) {
-    uint8_t mac[6] = {0};
-    WiFi.macAddress(mac);
-    snprintf(hostname, sizeof(hostname), "rotary-%02x%02x%02x", mac[3], mac[4], mac[5]);
-  }
-
-  if (!mdnsOk_ || hostname[0] == '\0') {
+  char hostname[32] = {};
+  if (!mdnsOk_ || !buildMdnsHostname(hostname, sizeof(hostname)) || hostname[0] == '\0') {
     if (WiFi.status() == WL_CONNECTED) {
       strlcpy(buffer, WiFi.localIP().toString().c_str(), length);
     }
