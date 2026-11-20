@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <WiFiUdp.h>
+#include <esp_event.h>
 #include <esp_netif.h>
 #include <esp_wifi.h>
 
@@ -32,18 +33,25 @@ WiFiUDP gRx;
 // used to call begin() again and abort association (the old 8s restart).
 constexpr uint32_t kWifiFailBackoffMs = 3000;
 constexpr uint32_t kWifiScanTimeoutMs = 20000;
-constexpr uint32_t kWifiJoinGiveUpMs = 20000;
+constexpr uint32_t kWifiStaBusyGiveUpMs = 20000;
 constexpr uint32_t kWifiBusyRetryMs = 1000;
 constexpr uint32_t kMdnsRetryMs = 2000;
+constexpr uint16_t kMaxScanAps = 32;
 
 // Set from the Wi-Fi event task. Loop re-announces mDNS; MDNS.begin from the
 // event callback deadlocks the mdns task against the event loop.
 volatile bool gStaGotIp = false;
 volatile bool gScanDone = false;
 volatile bool gJoinPending = false;
+volatile bool gCaptureScan = false;
+// Arduino calls WiFi.begin() with no arguments on the first disconnect.
+// That one retry keeps the config we stored, so it must not start a new scan.
+volatile bool gExpectCoreRetry = true;
 volatile uint32_t gWifiRetryAfterMs = 0;
 volatile uint32_t gIgnoreDisconnectUntil = 0;
 volatile uint32_t gJoinStartedMs = 0;
+volatile uint16_t gScanApCount = 0;
+wifi_ap_record_t gScanAps[kMaxScanAps];
 
 bool isMdnsLabelChar(char c) {
   return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-';
@@ -87,32 +95,53 @@ bool sanitizeMdnsLabel(char* dest, size_t destSize, const char* raw) {
   return true;
 }
 
-bool sameSsid(const char* configured, const String& scanned) {
-  if (configured == nullptr) {
-    return false;
+size_t recordSsidLen(const uint8_t* ssid) {
+  if (ssid == nullptr) {
+    return 0;
   }
-  // Byte length, not a tokenizing compare. A %s / strtok match stops at the
-  // space and would treat "Lunatic Network" as a different AP.
-  const size_t len = strnlen(configured, 32);
-  return len > 0 && scanned.length() == len && memcmp(scanned.c_str(), configured, len) == 0;
+  return strnlen(reinterpret_cast<const char*>(ssid), 32);
 }
 
-void formatSsidHead(char* dest, size_t destSize, const char* ssid, size_t len) {
-  if (dest == nullptr || destSize == 0) {
+bool recordSsidEquals(const uint8_t* ssid, const char* want, size_t wantLen) {
+  if (ssid == nullptr || want == nullptr || wantLen == 0 || wantLen > 32) {
+    return false;
+  }
+  return recordSsidLen(ssid) == wantLen && memcmp(ssid, want, wantLen) == 0;
+}
+
+// Arduino's SCAN_DONE handler frees the driver list. Copy wifi_ap_record_t
+// here, on the event loop, before that handler runs.
+void captureScanRecords(void* /*arg*/, esp_event_base_t base, int32_t id, void* /*data*/) {
+  if (base != WIFI_EVENT || id != WIFI_EVENT_SCAN_DONE || !gCaptureScan) {
     return;
   }
-  size_t n = len;
-  if (n > 16) {
-    n = 16;
+  gCaptureScan = false;
+  uint16_t count = kMaxScanAps;
+  if (esp_wifi_scan_get_ap_records(&count, gScanAps) != ESP_OK) {
+    count = 0;
   }
-  if (n >= destSize) {
-    n = destSize - 1;
+  gScanApCount = count;
+  __sync_synchronize();
+  gScanDone = true;
+}
+
+void ensureScanCapture() {
+  static bool registered = false;
+  if (registered) {
+    return;
   }
-  for (size_t i = 0; i < n; ++i) {
-    const unsigned char c = static_cast<unsigned char>(ssid == nullptr ? 0 : ssid[i]);
-    dest[i] = (c >= 32 && c < 127) ? static_cast<char>(c) : '?';
+  const esp_err_t loopErr = esp_event_loop_create_default();
+  if (loopErr != ESP_OK && loopErr != ESP_ERR_INVALID_STATE) {
+    Serial.printf("wifi: event loop err=0x%x\n", static_cast<unsigned>(loopErr));
+    return;
   }
-  dest[n] = '\0';
+  const esp_err_t err =
+      esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &captureScanRecords, nullptr);
+  if (err != ESP_OK) {
+    Serial.printf("wifi: scan capture register err=0x%x\n", static_cast<unsigned>(err));
+    return;
+  }
+  registered = true;
 }
 
 size_t pad4(size_t size) { return (size + 3) & ~static_cast<size_t>(3); }
@@ -557,7 +586,10 @@ void Transport::ensureWifiHooks() {
   hooked = true;
   WiFi.onEvent([](arduino_event_id_t event, arduino_event_info_t info) {
     if (event == ARDUINO_EVENT_WIFI_SCAN_DONE) {
-      gScanDone = true;
+      // Our capture handler owns the result while a join scan is in flight.
+      if (!gCaptureScan) {
+        gScanDone = true;
+      }
       return;
     }
     if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
@@ -579,6 +611,15 @@ void Transport::ensureWifiHooks() {
                   info.wifi_sta_disconnected.reason, seen, len);
     // A disconnect we issued to unstick the STA is not a failed join.
     if (static_cast<int32_t>(gIgnoreDisconnectUntil - millis()) > 0) {
+      return;
+    }
+    if (info.wifi_sta_disconnected.reason == WIFI_REASON_ASSOC_LEAVE && gJoinPending) {
+      return;
+    }
+    if (gJoinPending && gExpectCoreRetry) {
+      // The core already called WiFi.begin() with the stored BSSID config.
+      gExpectCoreRetry = false;
+      gJoinStartedMs = millis();
       return;
     }
     gJoinPending = false;
@@ -622,6 +663,8 @@ void Transport::prepareWifiRadio() {
   WiFi.persistent(false);
   ensureWifiHooks();
   applyStaHostname();
+  // Register before WiFi.mode so this handler runs before Arduino frees the list.
+  ensureScanCapture();
   WiFi.mode(WIFI_STA);
   applyStaHostname();
   WiFi.setSleep(false);
@@ -634,9 +677,9 @@ void Transport::prepareWifiRadio() {
   WiFi.setMinSecurity(WIFI_AUTH_OPEN);
 }
 
-void Transport::joinWifi(const char* ssid, const char* pass, int32_t channel, const uint8_t* bssid,
-                         int32_t rssi) {
-  if (ssid == nullptr || bssid == nullptr || channel <= 0) {
+void Transport::joinWifi(const uint8_t* ssid32, uint8_t channel, const uint8_t* bssid, int32_t rssi,
+                         const char* pass) {
+  if (ssid32 == nullptr || bssid == nullptr || channel == 0) {
     Serial.println("wifi: join skipped, scan had no bssid");
     gWifiRetryAfterMs = millis() + kWifiFailBackoffMs;
     return;
@@ -644,21 +687,13 @@ void Transport::joinWifi(const char* ssid, const char* pass, int32_t channel, co
   if (pass == nullptr) {
     pass = "";
   }
-  const size_t ssidLen = strnlen(ssid, 32);
-  const size_t passLen = strnlen(pass, 64);
-  if (passLen == 33) {
-    // 33 is a surprising stored length. Reason 201 is still "AP not found".
-    static bool noted = false;
-    if (!noted) {
-      noted = true;
-      Serial.println("wifi: passLen=33 noted; reason 201 is NO_AP_FOUND, not a bad password");
-    }
-  }
+  const size_t ssidLen = recordSsidLen(ssid32);
+  const size_t passLen = strnlen(pass, sizeof(wifi_sta_config_t::password));
 
-  // Copy SSID bytes explicitly. Do not hand the name to WiFi.begin(), whose
-  // no-BSSID path lets the driver match the SSID and stop at the first space.
+  // Raw beacon bytes, including the space. WiFi.begin() FAST_SCAN matches the
+  // name with a compare that stops at the first space and returns NO_AP_FOUND.
   wifi_config_t conf = {};
-  memcpy(conf.sta.ssid, ssid, ssidLen);
+  memcpy(conf.sta.ssid, ssid32, sizeof(conf.sta.ssid));
   if (passLen > 0) {
     memcpy(conf.sta.password, pass, passLen);
   }
@@ -669,8 +704,7 @@ void Transport::joinWifi(const char* ssid, const char* pass, int32_t channel, co
   conf.sta.pmf_cfg.capable = true;
   conf.sta.bssid_set = true;
   memcpy(conf.sta.bssid, bssid, 6);
-  conf.sta.channel = static_cast<uint8_t>(channel);
-  conf.sta.failure_retry_cnt = 3;
+  conf.sta.channel = channel;
 
   applyStaHostname();
   const esp_err_t setErr = esp_wifi_set_config(WIFI_IF_STA, &conf);
@@ -688,68 +722,45 @@ void Transport::joinWifi(const char* ssid, const char* pass, int32_t channel, co
     gWifiRetryAfterMs = millis() + kWifiFailBackoffMs;
   }
   Serial.printf(
-      "wifi: join %s len=%u passLen=%u ch=%ld rssi=%ld bssid=%02X:%02X:%02X:%02X:%02X:%02X set=0x%x conn=0x%x\n",
-      ssid, static_cast<unsigned>(ssidLen), static_cast<unsigned>(passLen), static_cast<long>(channel),
-      static_cast<long>(rssi), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5],
+      "wifi: join %.*s len=%u ch=%u rssi=%ld bssid=%02X:%02X:%02X:%02X:%02X:%02X set=0x%x conn=0x%x\n",
+      static_cast<int>(ssidLen), reinterpret_cast<const char*>(ssid32), static_cast<unsigned>(ssidLen),
+      channel, static_cast<long>(rssi), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5],
       static_cast<unsigned>(setErr), static_cast<unsigned>(connErr));
   wifiScanActive_ = false;
 }
 
 void Transport::finishWifiScan(const char* ssid, const char* pass) {
-  const int16_t count = WiFi.scanComplete();
-  if (count < 0 && scanStartMs_ != 0 && millis() - scanStartMs_ < kWifiScanTimeoutMs) {
-    // SCAN_DONE arrived before the result list is readable. Keep waiting.
-    return;
-  }
   wifiScanActive_ = false;
+  __sync_synchronize();
+  const uint16_t count = gScanApCount;
   gScanDone = false;
 
   int best = -1;
   int32_t bestRssi = -1000;
   const size_t ssidLen = ssid == nullptr ? 0 : strnlen(ssid, 32);
-  if (count > 0 && ssidLen > 0) {
-    for (int16_t i = 0; i < count; ++i) {
-      const String ap = WiFi.SSID(static_cast<uint8_t>(i));
-      if (!sameSsid(ssid, ap)) {
+  if (ssidLen > 0) {
+    for (uint16_t i = 0; i < count; ++i) {
+      if (!recordSsidEquals(gScanAps[i].ssid, ssid, ssidLen)) {
         continue;
       }
-      const int32_t rssi = WiFi.RSSI(static_cast<uint8_t>(i));
-      if (best < 0 || rssi > bestRssi) {
-        best = i;
-        bestRssi = rssi;
+      if (best < 0 || gScanAps[i].rssi > bestRssi) {
+        best = static_cast<int>(i);
+        bestRssi = gScanAps[i].rssi;
       }
     }
   }
 
-  if (best >= 0) {
-    const String ap = WiFi.SSID(static_cast<uint8_t>(best));
-    char head[17] = {};
-    formatSsidHead(head, sizeof(head), ap.c_str(), ap.length());
-    const int32_t channel = WiFi.channel(static_cast<uint8_t>(best));
-    Serial.printf("wifi: scan count=%d matched=1 len=%u head=[%s] ch=%ld rssi=%ld\n",
-                  static_cast<int>(count), static_cast<unsigned>(ap.length()), head,
-                  static_cast<long>(channel), static_cast<long>(bestRssi));
-    uint8_t bssid[6] = {};
-    const uint8_t* found = WiFi.BSSID(static_cast<uint8_t>(best));
-    if (found != nullptr && channel > 0) {
-      memcpy(bssid, found, sizeof(bssid));
-      WiFi.scanDelete();
-      joinWifi(ssid, pass, channel, bssid, bestRssi);
-      return;
-    }
+  if (best >= 0 && gScanAps[best].primary > 0) {
+    const wifi_ap_record_t ap = gScanAps[best];
+    Serial.printf(
+        "wifi: scan count=%u matched=1 ch=%u rssi=%d bssid=%02X:%02X:%02X:%02X:%02X:%02X\n", count,
+        ap.primary, static_cast<int>(ap.rssi), ap.bssid[0], ap.bssid[1], ap.bssid[2], ap.bssid[3],
+        ap.bssid[4], ap.bssid[5]);
+    joinWifi(ap.ssid, ap.primary, ap.bssid, ap.rssi, pass);
+    return;
   }
 
-  Serial.printf("wifi: scan count=%d matched=0 wantLen=%u\n", static_cast<int>(count),
-                static_cast<unsigned>(ssidLen));
-  const int16_t shown = count > 4 ? 4 : (count > 0 ? count : 0);
-  for (int16_t i = 0; i < shown; ++i) {
-    const String ap = WiFi.SSID(static_cast<uint8_t>(i));
-    char head[17] = {};
-    formatSsidHead(head, sizeof(head), ap.c_str(), ap.length());
-    Serial.printf("wifi: scan ap%d len=%u head=[%s]\n", static_cast<int>(i),
-                  static_cast<unsigned>(ap.length()), head);
-  }
-  WiFi.scanDelete();
+  Serial.printf("wifi: scan count=%u matched=0\n", count);
   gWifiRetryAfterMs = millis() + kWifiFailBackoffMs;
 }
 
@@ -760,6 +771,8 @@ void Transport::startWifiScan() {
   }
   WiFi.scanDelete();
   gScanDone = false;
+  gScanApCount = 0;
+  gCaptureScan = true;
 
   // Channel 0 scans every channel. ssid NULL is a broadcast probe so the
   // driver does not filter the name with a match that stops at a space.
@@ -775,10 +788,11 @@ void Transport::startWifiScan() {
 
   const esp_err_t err = esp_wifi_scan_start(&config, false);
   if (err == ESP_ERR_WIFI_STATE) {
+    gCaptureScan = false;
     if (staBusySinceMs_ == 0) {
       staBusySinceMs_ = millis();
       Serial.println("wifi: scan deferred sta busy");
-    } else if (millis() - staBusySinceMs_ > kWifiJoinGiveUpMs) {
+    } else if (millis() - staBusySinceMs_ > kWifiStaBusyGiveUpMs) {
       gIgnoreDisconnectUntil = millis() + 1000;
       esp_wifi_disconnect();
       staBusySinceMs_ = 0;
@@ -789,6 +803,7 @@ void Transport::startWifiScan() {
     return;
   }
   if (err != ESP_OK) {
+    gCaptureScan = false;
     Serial.printf("wifi: scan start err=0x%x\n", static_cast<unsigned>(err));
     gWifiRetryAfterMs = millis() + kWifiFailBackoffMs;
     wifiScanActive_ = false;
@@ -809,6 +824,7 @@ void Transport::connectWifi(const DeviceConfig& config, bool runPortal) {
   hostIpValid_ = false;
   wifiScanActive_ = false;
   gScanDone = false;
+  gCaptureScan = false;
   gJoinPending = false;
   gJoinStartedMs = 0;
   gWifiRetryAfterMs = 0;
@@ -870,6 +886,7 @@ void Transport::maintainWifi() {
     if (wifiScanActive_) {
       if (!gScanDone) {
         if (scanStartMs_ != 0 && millis() - scanStartMs_ > kWifiScanTimeoutMs) {
+          gCaptureScan = false;
           esp_wifi_scan_stop();
           wifiScanActive_ = false;
           gScanDone = false;
@@ -882,13 +899,6 @@ void Transport::maintainWifi() {
       return;
     }
     if (gJoinPending) {
-      if (gJoinStartedMs != 0 && millis() - gJoinStartedMs > kWifiJoinGiveUpMs) {
-        Serial.println("wifi: join still pending, allowing retry");
-        gIgnoreDisconnectUntil = millis() + 1000;
-        gJoinPending = false;
-        gJoinStartedMs = 0;
-        esp_wifi_disconnect();
-      }
       return;
     }
     const uint32_t now = millis();
@@ -1077,6 +1087,7 @@ void Transport::disconnectWifi() {
   wifiRxReady_ = false;
   wifiScanActive_ = false;
   gScanDone = false;
+  gCaptureScan = false;
   gJoinPending = false;
   gJoinStartedMs = 0;
   gWifiRetryAfterMs = 0;

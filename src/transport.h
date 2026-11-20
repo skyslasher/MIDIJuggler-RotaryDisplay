@@ -89,8 +89,8 @@ class Transport {
   void applyStaHostname();
   void startWifiScan();
   void finishWifiScan(const char* ssid, const char* pass);
-  void joinWifi(const char* ssid, const char* pass, int32_t channel, const uint8_t* bssid,
-                int32_t rssi);
+  void joinWifi(const uint8_t* ssid32, uint8_t channel, const uint8_t* bssid, int32_t rssi,
+                const char* pass);
   void disconnectWifi();
   void onWifiReady();
   void startMdns();
