@@ -52,6 +52,9 @@ volatile uint32_t gIgnoreDisconnectUntil = 0;
 volatile uint32_t gJoinStartedMs = 0;
 volatile uint16_t gScanApCount = 0;
 wifi_ap_record_t gScanAps[kMaxScanAps];
+// Broadcast scans miss a hidden AP. The follow-up probe names it explicitly.
+uint8_t gProbeSsid[33] = {};
+bool gUseDirectedProbe = false;
 
 bool isMdnsLabelChar(char c) {
   return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-';
@@ -752,6 +755,7 @@ void Transport::finishWifiScan(const char* ssid, const char* pass) {
 
   if (best >= 0 && gScanAps[best].primary > 0) {
     const wifi_ap_record_t ap = gScanAps[best];
+    gUseDirectedProbe = false;
     Serial.printf(
         "wifi: scan count=%u matched=1 ch=%u rssi=%d bssid=%02X:%02X:%02X:%02X:%02X:%02X\n", count,
         ap.primary, static_cast<int>(ap.rssi), ap.bssid[0], ap.bssid[1], ap.bssid[2], ap.bssid[3],
@@ -760,7 +764,25 @@ void Transport::finishWifiScan(const char* ssid, const char* pass) {
     return;
   }
 
-  Serial.printf("wifi: scan count=%u matched=0\n", count);
+  Serial.printf("wifi: scan count=%u matched=0 probe=%u\n", count,
+                gUseDirectedProbe ? 1u : 0u);
+  for (uint16_t i = 0; i < count; ++i) {
+    const size_t apLen = recordSsidLen(gScanAps[i].ssid);
+    Serial.printf("wifi: ap %u ch=%u len=%u [", i, gScanAps[i].primary,
+                  static_cast<unsigned>(apLen));
+    for (size_t n = 0; n < apLen; ++n) {
+      const char c = static_cast<char>(gScanAps[i].ssid[n]);
+      Serial.write((c >= 32 && c <= 126) ? c : '.');
+    }
+    Serial.println("]");
+  }
+  if (!gUseDirectedProbe && ssidLen > 0) {
+    gUseDirectedProbe = true;
+    gWifiRetryAfterMs = 0;
+    startWifiScan();
+    return;
+  }
+  gUseDirectedProbe = false;
   gWifiRetryAfterMs = millis() + kWifiFailBackoffMs;
 }
 
@@ -773,13 +795,19 @@ void Transport::startWifiScan() {
   gScanDone = false;
   gScanApCount = 0;
   gCaptureScan = true;
+  const char* ssid = deviceConfig_ == nullptr ? "" : deviceConfig_->wifiSsid;
 
-  // Channel 0 scans every channel. ssid NULL is a broadcast probe so the
-  // driver does not filter the name with a match that stops at a space.
-  // Arduino's scanNetworks leaves home_chan_dwell_time uninitialized.
+  // Channel 0 scans every 2.4 GHz channel. A null SSID is a broadcast probe.
+  // This radio cannot see 5 GHz. A hidden AP only answers a probe that names it.
   wifi_scan_config_t config = {};
   config.ssid = nullptr;
   config.bssid = nullptr;
+  if (gUseDirectedProbe && ssid != nullptr && ssid[0] != '\0') {
+    memset(gProbeSsid, 0, sizeof(gProbeSsid));
+    const size_t n = strnlen(ssid, 32);
+    memcpy(gProbeSsid, ssid, n);
+    config.ssid = gProbeSsid;
+  }
   config.channel = 0;
   config.show_hidden = true;
   config.scan_type = WIFI_SCAN_TYPE_ACTIVE;
@@ -812,9 +840,8 @@ void Transport::startWifiScan() {
   staBusySinceMs_ = 0;
   wifiScanActive_ = true;
   scanStartMs_ = millis();
-  const char* ssid = deviceConfig_ == nullptr ? "" : deviceConfig_->wifiSsid;
-  Serial.printf("wifi: scanning all channels for %s len=%u\n", ssid,
-                static_cast<unsigned>(strnlen(ssid, 32)));
+  Serial.printf("wifi: scanning all channels for %s len=%u probe=%u\n", ssid,
+                static_cast<unsigned>(strnlen(ssid, 32)), gUseDirectedProbe ? 1u : 0u);
 }
 
 void Transport::connectWifi(const DeviceConfig& config, bool runPortal) {
@@ -828,6 +855,7 @@ void Transport::connectWifi(const DeviceConfig& config, bool runPortal) {
   gJoinPending = false;
   gJoinStartedMs = 0;
   gWifiRetryAfterMs = 0;
+  gUseDirectedProbe = false;
   staBusySinceMs_ = 0;
 
   if (!wifiEnabled_) {
